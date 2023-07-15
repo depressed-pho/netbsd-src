@@ -40,7 +40,9 @@
 #define	dma_pool_create		linux_dma_pool_create
 #define	dma_pool_destroy	linux_dma_pool_destroy
 #define	dma_pool_free		linux_dma_pool_free
+#define	dma_pool_alloc		linux_dma_pool_alloc
 #define	dma_pool_zalloc		linux_dma_pool_zalloc
+#define	dma_pool_sync		linux_dma_pool_sync
 
 struct dma_pool;
 
@@ -48,7 +50,25 @@ struct dma_pool *dma_pool_create(const char *, bus_dma_tag_t, size_t, size_t,
     size_t);
 void dma_pool_destroy(struct dma_pool *);
 
-void *dma_pool_zalloc(struct dma_pool *, gfp_t, dma_addr_t *);
-void dma_pool_free(struct dma_pool *, void *, dma_addr_t);
+/*
+ * WARNING: Unlike on Linux where dma_pool_alloc() allocates a DMA coherent
+ * memory region where no explicit synchronization is necessary, you MUST
+ * explicitly call dma_pool_sync() before and after performing a
+ * DMA. Failing to do it results in an undefined behavior.
+ */
+void *dma_pool_alloc(struct dma_pool *, gfp_t, bus_addr_t *);
+void *dma_pool_zalloc(struct dma_pool *, gfp_t, bus_addr_t *);
+void dma_pool_free(struct dma_pool *, void *, bus_addr_t);
+
+/*
+ * Perform pre- and post-DMA memory synchronization.
+ *
+ * pool:	The DMA pool the memory region came from.
+ * handle:	The physical address obtained with dma_pool_alloc().
+ * ops:		A combination of BUS_DMASYNC_PREREAD, BUS_DMASYNC_POSTREAD,
+ *		BUS_DMASYNC_PREWRITE, and BUS_DMASYNC_POSTWRITE. Mixing of
+ *		PRE and POST operations is not allowed.
+ */
+void dma_pool_sync(struct dma_pool *pool, bus_addr_t handle, int ops);
 
 #endif	/* _LINUX_DMAPOOL_H_ */
