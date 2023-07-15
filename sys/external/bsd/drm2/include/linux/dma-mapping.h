@@ -72,4 +72,11 @@ dma_addressing_limited(device_t dev)
 	return false;
 }
 
+static inline unsigned int
+dma_get_max_seg_size(device_t dev)
+{
+	/* We don't have a max segment size. */
+	return UINT_MAX;
+}
+
 #endif  /* _LINUX_DMA_MAPPING_H_ */
