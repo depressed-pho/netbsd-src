@@ -1855,8 +1855,9 @@ void ttm_bo_unmap_virtual_locked(struct ttm_buffer_object *bo)
 
 		rw_enter(bo->uvmobj.vmobjlock, RW_WRITER);
 		for (i = 0; i < bo->ttm->num_pages; i++)
-			pmap_page_protect(&bo->ttm->pages[i]->p_vmp,
-			    VM_PROT_NONE);
+			if (bo->ttm->pages[i])
+				pmap_page_protect(&bo->ttm->pages[i]->p_vmp,
+				    VM_PROT_NONE);
 		rw_exit(bo->uvmobj.vmobjlock);
 	}
 #else
