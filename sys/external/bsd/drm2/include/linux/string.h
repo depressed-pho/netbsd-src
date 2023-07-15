@@ -37,6 +37,7 @@
 #include <sys/errno.h>
 #include <sys/null.h>
 
+#include <linux/err.h>
 #include <linux/slab.h>
 
 static inline void *
@@ -62,6 +63,25 @@ kmemdup(const void *src, size_t len, gfp_t gfp)
 		return NULL;
 
 	(void)memcpy(dst, src, len);
+	return dst;
+}
+
+static inline void *
+memdup_user(const void *src, size_t len)
+{
+	void *dst;
+	int err;
+
+	dst = kmalloc(len, GFP_KERNEL);
+	if (dst == NULL)
+		return ERR_PTR(-ENOMEM);
+
+	err = copyin(src, dst, len);
+	if (err) {
+		kfree(dst);
+		return ERR_PTR(-err);
+	}
+
 	return dst;
 }
 
