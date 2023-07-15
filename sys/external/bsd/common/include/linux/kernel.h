@@ -110,6 +110,7 @@
  */
 #define	DIV_ROUND_UP(X, N)	(((X) + (N) - 1) / (N))
 #define	DIV_ROUND_UP_ULL(X, N)	DIV_ROUND_UP((unsigned long long)(X), (N))
+#define	__KERNEL_DIV_ROUND_UP	DIV_ROUND_UP
 
 #define	DIV_ROUND_DOWN_ULL(X,N)	((unsigned long long)(X) / (N))
 
