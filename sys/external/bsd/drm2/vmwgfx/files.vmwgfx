@@ -30,11 +30,16 @@ makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx"+="-Wno-missing-field-initializers"
 makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx"+="-Wno-pointer-arith"
 makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx"+="-Wno-unused-but-set-variable"
 makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx"+="-Wno-unused-function"
+makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx_ttm_buffer.c"+="-Wno-unused-label"
+makeoptions	vmwgfx	"CWARNFLAGS.vmwgfx_validation.c"+="-Wno-shadow"
 
+# Local additions
 file	external/bsd/drm2/vmwgfx/vmwgfx_module.c		vmwgfx
 file	external/bsd/drm2/vmwgfx/vmwgfx_pci.c			vmwgfx
-
 file	external/bsd/drm2/vmwgfx/vmwgfxfb.c			vmwgfxfb
+
+# Local overrides
+file	external/bsd/drm2/vmwgfx/vmwgfx_fb.c			vmwgfx
 
 # Generated from vmwgfx2netbsd.  Tweaked to avoid renaming ttm_*.c to
 # vmwgfx_ttm_*.c -- do that on the next import.

@@ -38,6 +38,37 @@ __KERNEL_RCSID(0, "$NetBSD: vmwgfx_resource.c,v 1.4 2022/02/17 01:21:02 riastrad
 
 #define VMW_RES_EVICT_ERR_COUNT 10
 
+#if defined(__NetBSD__)
+static int
+compare_backup_offsets(void *cookie, const void *va, const void *vb)
+{
+	const struct vmw_resource *a = va, *b = vb;
+
+	if (a->backup_offset < b->backup_offset)
+		return -1;
+	else if (a->backup_offset > b->backup_offset)
+		return +1;
+	else if ((uintptr_t)a < (uintptr_t)b)
+		return -1;
+	else if ((uintptr_t)a > (uintptr_t)b)
+		return +1;
+	else
+		return 0;
+}
+
+static int
+compare_backup_offset_key(void *cookie, const void *va, const void *vk)
+{
+	panic("This rbtree does not support comparison with key");
+}
+
+const rb_tree_ops_t vmwgfx_res_rb_ops = {
+	.rbto_compare_nodes = compare_backup_offsets,
+	.rbto_compare_key = compare_backup_offset_key,
+	.rbto_node_offset = offsetof(struct vmw_resource, mob_node),
+};
+#endif
+
 /**
  * vmw_resource_mob_attach - Mark a resource as attached to its backing mob
  * @res: The resource
@@ -45,14 +76,18 @@ __KERNEL_RCSID(0, "$NetBSD: vmwgfx_resource.c,v 1.4 2022/02/17 01:21:02 riastrad
 void vmw_resource_mob_attach(struct vmw_resource *res)
 {
 	struct vmw_buffer_object *backup = res->backup;
+#if !defined(__NetBSD__) /* rb_root::rb_node doesn't exist on NetBSD */
 	struct rb_node **new = &backup->res_tree.rb_node, *parent = NULL;
+#endif
 
 	dma_resv_assert_held(res->backup->base.base.resv);
 	res->used_prio = (res->res_dirty) ? res->func->dirty_prio :
 		res->func->prio;
 
 #ifdef __NetBSD__
-	rb_tree_insert_node etc etc etc
+	void* const inserted =
+		rb_tree_insert_node(&backup->res_tree.rbr_tree, res);
+	KASSERT(inserted == res);
 #else
 	while (*new) {
 		struct vmw_resource *this =
@@ -83,7 +118,9 @@ void vmw_resource_mob_detach(struct vmw_resource *res)
 	if (vmw_resource_mob_attached(res)) {
 		res->mob_attached = false;
 		rb_erase(&res->mob_node, &backup->res_tree);
+#if !defined(__NetBSD__)
 		RB_CLEAR_NODE(&res->mob_node);
+#endif
 		vmw_bo_prio_del(backup, res->used_prio);
 	}
 }
@@ -229,7 +266,9 @@ int vmw_resource_init(struct vmw_private *dev_priv, struct vmw_resource *res,
 	res->res_free = res_free;
 	res->dev_priv = dev_priv;
 	res->func = func;
+#if !defined(__NetBSD__)
 	RB_CLEAR_NODE(&res->mob_node);
+#endif
 	INIT_LIST_HEAD(&res->lru_head);
 	INIT_LIST_HEAD(&res->binding_head);
 	res->id = -1;
@@ -420,6 +459,9 @@ static int vmw_resource_do_validate(struct vmw_resource *res,
 	    ((func->needs_backup && !vmw_resource_mob_attached(res) &&
 	      val_buf->bo != NULL) ||
 	     (!func->needs_backup && val_buf->bo != NULL))) {
+#if defined(__NetBSD__)
+		vmw_bo_dma_sync(&res->backup->base, BUS_DMASYNC_PREWRITE);
+#endif
 		ret = func->bind(res, val_buf);
 		if (unlikely(ret != 0))
 			goto out_bind_failed;
@@ -457,6 +499,9 @@ static int vmw_resource_do_validate(struct vmw_resource *res,
 		}
 
 		vmw_bo_dirty_transfer_to_res(res);
+#if defined(__NetBSD__)
+		vmw_bo_dma_sync(&res->backup->base, BUS_DMASYNC_PREWRITE);
+#endif
 		return func->dirty_sync(res);
 	}
 
@@ -797,7 +842,7 @@ void vmw_resource_unbind_list(struct vmw_buffer_object *vbo)
 
 	dma_resv_assert_held(vbo->base.base.resv);
 	while (!RB_EMPTY_ROOT(&vbo->res_tree)) {
-		struct rb_node *node = vbo->res_tree.rb_node;
+		struct rb_node *node = rb_first(&vbo->res_tree);
 		struct vmw_resource *res =
 			container_of(node, struct vmw_resource, mob_node);
 
@@ -1114,7 +1159,7 @@ void vmw_resource_dirty_update(struct vmw_resource *res, pgoff_t start,
 int vmw_resources_clean(struct vmw_buffer_object *vbo, pgoff_t start,
 			pgoff_t end, pgoff_t *num_prefault)
 {
-	struct rb_node *cur = vbo->res_tree.rb_node;
+	struct rb_node *cur = rb_first(&vbo->res_tree);
 	struct vmw_resource *found = NULL;
 	unsigned long res_start = start << PAGE_SHIFT;
 	unsigned long res_end = end << PAGE_SHIFT;
@@ -1158,7 +1203,11 @@ int vmw_resources_clean(struct vmw_buffer_object *vbo, pgoff_t start,
 			found->res_dirty = false;
 		}
 		last_cleaned = found->backup_offset + found->backup_size;
+#if defined(__NetBSD__)
+		cur = rb_next2(&vbo->res_tree, &found->mob_node);
+#else
 		cur = rb_next(&found->mob_node);
+#endif
 		if (!cur)
 			break;
 

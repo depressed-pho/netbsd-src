@@ -138,8 +138,8 @@ static int ttm_sg_tt_alloc_page_directory(struct ttm_dma_tt *ttm)
 	ttm->dma_address = NULL;
 	/* XXX errno NetBSD->Linux */
 	return -bus_dmamap_create(ttm->ttm.bdev->dmat,
-	    ttm->ttm.num_pages << PAGE_SHIFT, ttm->ttm.num_pages, PAGE_SIZE, 0,
-	    BUS_DMA_WAITOK, &ttm->dma_address);
+	    ttm->ttm.num_pages << PAGE_SHIFT, ttm->ttm.num_pages,
+	    PAGE_SIZE, PAGE_SIZE, BUS_DMA_WAITOK, &ttm->dma_address);
 #else
 	ttm->dma_address = kvmalloc_array(ttm->ttm.num_pages,
 					  sizeof(*ttm->dma_address),
@@ -530,6 +530,8 @@ int ttm_tt_swapout(struct ttm_tt *ttm, struct file *persistent_swap_storage)
 	    "ttm_tt %p must be cached for swapout, but caching_state=%d",
 	    ttm, (int)ttm->caching_state);
 	KASSERT(persistent_swap_storage == NULL);
+	KASSERTMSG(ttm->bdev->driver->ttm_tt_swapout,
+	    "The ttm_bo_driver does not implement ttm_tt_swapout()");
 
 	ttm->bdev->driver->ttm_tt_swapout(ttm);
 	return 0;

@@ -156,25 +156,14 @@ vmwgfxfb_shutdown(device_t self, int flags)
 static paddr_t
 vmwgfxfb_drmfb_mmapfb(struct drmfb_softc *drmfb, off_t offset, int prot)
 {
-	struct vmwgfxfb_softc *const sc = container_of(drmfb,
-	    struct vmwgfxfb_softc, sc_drmfb);
-	struct drm_fb_helper *const helper = sc->sc_vfa.vfa_fb_helper;
-	struct drm_framebuffer *const fb = helper->fb;
-	struct vmw_buffer_object *const vbo = /*XXX MAGIC HERE*/;
-	int flags = 0;
-
-	if (offset < 0)
-		return -1;
-
-	const unsigned num_pages __diagused = vbo->base.num_pages;
-
-	KASSERT(offset < (num_pages << PAGE_SHIFT));
-	KASSERT(vbo->base.mem.bus.is_iomem);
-
-	if (ISSET(vbo->base.mem.placement, TTM_PL_FLAG_WC))
-		flags |= BUS_SPACE_MAP_PREFETCHABLE;
-
-	return bus_space_mmap(vbo->base.bdev->memt,
-	    vbo->base.mem.bus.base, vbo->base.mem.bus.offset + offset,
-	    prot, flags);
+	/*
+	 * We don't support the dumbfb mode, because we can't just map a
+	 * framebuffer in VRAM and call it a day, as vmwgfx isn't designed
+	 * for that. The only way to support this mode is to allocate a
+	 * buffer in the system memory, map it as PROT_READ, handle faults
+	 * to detect updates, and send update commands to GPU. That's a lot
+	 * of work.
+	 */
+	DRM_ERROR("XXX: mmapping framebuffers is currently not supported\n");
+	return -1;
 }

@@ -37,6 +37,10 @@ __KERNEL_RCSID(0, "$NetBSD: vmwgfx_drv.c,v 1.7 2022/10/25 23:35:43 riastradh Exp
 
 #include <drm/drm_drv.h>
 #include <drm/drm_ioctl.h>
+#if defined(__NetBSD__)
+#  include <drm/drm_fb_helper.h>
+#  include <drm/drm_pci.h>
+#endif
 #include <drm/drm_sysfs.h>
 #include <drm/ttm/ttm_bo_driver.h>
 #include <drm/ttm/ttm_module.h>
@@ -578,6 +582,9 @@ static void vmw_get_initial_size(struct vmw_private *dev_priv)
  */
 static int vmw_dma_select_mode(struct vmw_private *dev_priv)
 {
+#if defined(__NetBSD__)
+        dev_priv->map_mode = vmw_dma_alloc_coherent;
+#else
 	static const char *names[vmw_dma_map_max] = {
 		[vmw_dma_phys] = "Using physical TTM page addresses.",
 		[vmw_dma_alloc_coherent] = "Using coherent TTM pages.",
@@ -596,6 +603,7 @@ static int vmw_dma_select_mode(struct vmw_private *dev_priv)
 		return -EINVAL;
 
 	DRM_INFO("DMA map mode: %s\n", names[dev_priv->map_mode]);
+#endif
 	return 0;
 }
 
@@ -638,6 +646,9 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 	enum vmw_res_type i;
 	bool refuse_dma = false;
 	char host_log[100] = {0};
+#if defined(__NetBSD__)
+	bool io_ports_mapped = false;
+#endif
 
 	dev_priv = kzalloc(sizeof(*dev_priv), GFP_KERNEL);
 	if (unlikely(!dev_priv)) {
@@ -684,6 +695,19 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 
 	dev_priv->enable_fb = enable_fbdev;
 
+#ifdef __NetBSD__
+	dev_priv->iot = dev->pdev->pd_pa.pa_iot;
+
+	/* XXX errno NetBSD->Linux */
+	ret = -bus_space_map(dev_priv->iot, dev_priv->io_start, VMWGFX_IOSIZE,
+	    0, &dev_priv->ioh);
+	if (ret) {
+		DRM_ERROR("Failed mapping IO ports.\n");
+		goto out_err0;
+	}
+	io_ports_mapped = true;
+#endif
+
 	vmw_write(dev_priv, SVGA_REG_ID, SVGA_ID_2);
 	svga_id = vmw_read(dev_priv, SVGA_REG_ID);
 	if (svga_id != SVGA_ID_2) {
@@ -699,11 +723,13 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 	}
 
 
+#if defined(__NetBSD__)
 	ret = vmw_dma_select_mode(dev_priv);
 	if (unlikely(ret != 0)) {
 		DRM_INFO("Restricting capabilities due to IOMMU setup.\n");
 		refuse_dma = true;
 	}
+#endif
 
 	dev_priv->vram_size = vmw_read(dev_priv, SVGA_REG_VRAM_SIZE);
 	dev_priv->mmio_size = vmw_read(dev_priv, SVGA_REG_MEM_SIZE);
@@ -814,18 +840,6 @@ static int vmw_driver_load(struct drm_device *dev, unsigned long chipset)
 		DRM_ERROR("Failed mapping MMIO.\n");
 		goto out_err0;
 	}
-
-#ifdef __NetBSD__
-	dev_priv->iot = dev->pdev->pd_pa.pa_iot;
-
-	/* XXX errno NetBSD->Linux */
-	ret = -bus_space_map(dev_priv->iot, dev_priv->io_start, VMWGFX_IOSIZE,
-	    0, &dev_priv->ioh);
-	if (ret) {
-		DRM_ERROR("Failed mapping IO ports.\n");
-		goto out_err3;
-	}
-#endif
 
 	/* Need mmio memory to check for fifo pitchlock cap. */
 	if (!(dev_priv->capabilities & SVGA_CAP_DISPLAY_TOPOLOGY) &&
@@ -1011,8 +1025,6 @@ out_no_device:
 	ttm_object_device_release(&dev_priv->tdev);
 out_err4:
 #ifdef __NetBSD__
-	bus_space_unmap(dev_priv->iot, dev_priv->ioh, VMWGFX_IOSIZE);
-out_err3:
 	dev_priv->mmio_virt = NULL;
 	bus_space_unmap(dev_priv->mmio_bst, dev_priv->mmio_bsh,
 	    dev_priv->mmio_size);
@@ -1020,6 +1032,10 @@ out_err3:
 	memunmap(dev_priv->mmio_virt);
 #endif
 out_err0:
+#if defined(__NetBSD__)
+	if (io_ports_mapped)
+		bus_space_unmap(dev_priv->iot, dev_priv->ioh, VMWGFX_IOSIZE);
+#endif
 	spin_lock_destroy(&dev_priv->fifo_lock);
 	DRM_DESTROY_WAITQUEUE(&dev_priv->fifo_queue);
 	spin_lock_destroy(&dev_priv->fence_lock);
@@ -1352,7 +1368,7 @@ static int vmwgfx_pm_notifier(struct notifier_block *nb, unsigned long val,
 	return 0;
 }
 
-#ifndef __NetBSD__
+#if !defined(__NetBSD__)
 
 static int vmw_pci_suspend(struct pci_dev *pdev, pm_message_t state)
 {
@@ -1512,6 +1528,12 @@ static struct drm_driver driver = {
 	.postclose = vmw_postclose,
 	.unload = vmw_driver_unload,
 
+#if defined(__NetBSD__)
+	.request_irq = drm_pci_request_irq,
+	.free_irq = drm_pci_free_irq,
+	.irq_handler = vmw_irq_handler,
+#endif
+
 	.dumb_create = vmw_dumb_create,
 	.dumb_map_offset = vmw_dumb_map_offset,
 	.dumb_destroy = vmw_dumb_destroy,
@@ -1521,6 +1543,8 @@ static struct drm_driver driver = {
 
 #ifdef __NetBSD__
 	.ioctl_override = &vmw_unlocked_ioctl,
+	.mmap_object = &vmw_mmap_object,
+	.lastclose = &drm_fb_helper_lastclose,
 #else
 	.fops = &vmwgfx_driver_fops,
 #endif
@@ -1534,9 +1558,9 @@ static struct drm_driver driver = {
 
 #ifdef __NetBSD__
 
-const struct drm_driver *const vmwgfx_driver = &driver;
-const struct pci_device_id *const vmwgfx_pci_ids = vmw_pci_id_list;
-const size_t vmwgfx_n_pci_ids = __arraycount(vmw_pci_id_list);
+const struct drm_driver *const vmwgfx_drm_driver = &driver;
+const struct pci_device_id *const vmwgfx_device_ids = vmw_pci_id_list;
+const size_t vmwgfx_n_device_ids = __arraycount(vmw_pci_id_list);
 
 #else
 

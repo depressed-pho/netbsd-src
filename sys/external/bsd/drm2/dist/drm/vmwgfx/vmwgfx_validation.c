@@ -86,8 +86,16 @@ struct vmw_validation_res_node {
 	u32 reserved : 1;
 	u32 dirty : 1;
 	u32 dirty_set : 1;
-	unsigned long private[0];
+	char private[];
 };
+
+#if defined(__NetBSD__)
+struct vmw_page {
+	uvm_flag_t		flags;
+	vaddr_t			vaddr;
+	struct list_head	lru;
+};
+#endif
 
 /**
  * vmw_validation_mem_alloc - Allocate kernel memory from the validation
@@ -114,7 +122,11 @@ void *vmw_validation_mem_alloc(struct vmw_validation_context *ctx,
 		return NULL;
 
 	if (ctx->mem_size_left < size) {
+#if defined(__NetBSD__)
+		struct vmw_page *page;
+#else
 		struct page *page;
+#endif
 
 		if (ctx->vm && ctx->vm_size_left < PAGE_SIZE) {
 			int ret = ctx->vm->reserve_mem(ctx->vm, ctx->vm->gran);
@@ -126,15 +138,33 @@ void *vmw_validation_mem_alloc(struct vmw_validation_context *ctx,
 			ctx->total_mem += ctx->vm->gran;
 		}
 
+#if defined(__NetBSD__)
+		page = kmem_alloc(sizeof(*page), KM_SLEEP);
+		if (!page)
+			return NULL;
+
+		page->flags = UVM_KMF_WIRED | UVM_KMF_WAITVA | UVM_KMF_ZERO;
+		page->vaddr = uvm_km_alloc(kernel_map, PAGE_SIZE, PAGE_SIZE,
+		    page->flags);
+		if (!page->vaddr) {
+			kmem_free(page, sizeof(*page));
+			return NULL;
+		}
+#else
 		page = alloc_page(GFP_KERNEL | __GFP_ZERO);
 		if (!page)
 			return NULL;
+#endif
 
 		if (ctx->vm)
 			ctx->vm_size_left -= PAGE_SIZE;
 
 		list_add_tail(&page->lru, &ctx->page_list);
+#if defined(__NetBSD__)
+		ctx->page_address = (u8 *)page->vaddr;
+#else
 		ctx->page_address = page_address(page);
+#endif
 		ctx->mem_size_left = PAGE_SIZE;
 	}
 
@@ -154,11 +184,20 @@ void *vmw_validation_mem_alloc(struct vmw_validation_context *ctx,
  */
 static void vmw_validation_mem_free(struct vmw_validation_context *ctx)
 {
+#if defined(__NetBSD__)
+	struct vmw_page *entry, *next;
+#else
 	struct page *entry, *next;
+#endif
 
 	list_for_each_entry_safe(entry, next, &ctx->page_list, lru) {
 		list_del_init(&entry->lru);
+#if defined(__NetBSD__)
+		uvm_km_free(kernel_map, entry->vaddr, PAGE_SIZE, entry->flags);
+		kmem_free(entry, sizeof(*entry));
+#else
 		__free_page(entry);
+#endif
 	}
 
 	ctx->mem_size_left = 0;
@@ -399,7 +438,8 @@ void vmw_validation_res_set_dirty(struct vmw_validation_context *ctx,
 	if (!dirty)
 		return;
 
-	val = container_of(val_private, typeof(*val), private);
+	val = (void *)((char *)val_private -
+	    offsetof(struct vmw_validation_res_node, private));
 	val->dirty_set = 1;
 	/* Overwriting previous information here is intentional! */
 	val->dirty = (dirty & VMW_RES_DIRTY_SET) ? 1 : 0;
@@ -423,7 +463,8 @@ void vmw_validation_res_switch_backup(struct vmw_validation_context *ctx,
 {
 	struct vmw_validation_res_node *val;
 
-	val = container_of(val_private, typeof(*val), private);
+	val = (void *)((char *)val_private -
+	    offsetof(struct vmw_validation_res_node, private));
 
 	val->switching_backup = 1;
 	if (val->first_usage)

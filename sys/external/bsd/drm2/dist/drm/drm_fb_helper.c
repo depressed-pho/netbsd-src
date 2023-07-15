@@ -1992,6 +1992,14 @@ EXPORT_SYMBOL(drm_fb_helper_hotplug_event);
 void drm_fb_helper_lastclose(struct drm_device *dev)
 {
 	drm_fb_helper_restore_fbdev_mode_unlocked(dev->fb_helper);
+#if defined(__NetBSD__)
+	/*
+	 * XXX: Restoring the mode is not enough. X.org uses VT_ACTIVATE ioctl
+	 * on its initialization and restores wsdisplay screen (or virtual
+	 * terminal) before exiting. But if it crashes or is killed with
+	 * SIGKILL, we are left on a null screen.
+	 */
+#endif
 }
 EXPORT_SYMBOL(drm_fb_helper_lastclose);
 

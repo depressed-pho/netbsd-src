@@ -32,6 +32,9 @@ __KERNEL_RCSID(0, "$NetBSD: vmwgfx_irq.c,v 1.6 2022/10/25 23:36:21 riastradh Exp
 
 #include <linux/sched/signal.h>
 
+#if defined(__NetBSD__)
+#  include <drm/drm_drv.h>
+#endif
 #include <drm/drm_irq.h>
 
 #include "vmwgfx_drv.h"
@@ -96,7 +99,7 @@ static irqreturn_t vmw_thread_fn(int irq, void *arg)
  * flags and also reasonably quick actions like waking processes waiting for
  * FIFO space. Other IRQ actions are deferred to the IRQ thread.
  */
-static irqreturn_t vmw_irq_handler(int irq, void *arg)
+irqreturn_t vmw_irq_handler(DRM_IRQ_ARGS)
 {
 	struct drm_device *dev = (struct drm_device *)arg;
 	struct vmw_private *dev_priv = vmw_priv(dev);

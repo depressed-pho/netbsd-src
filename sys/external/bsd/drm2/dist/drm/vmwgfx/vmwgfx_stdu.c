@@ -508,6 +508,15 @@ static void vmw_stdu_bo_fifo_commit(struct vmw_kms_dirty *dirty)
 		return;
 	}
 
+#if defined(__NetBSD__)
+	/*
+	 * We aren't going to wait for the completion of this command,
+	 * which means we can't perform a POSTWRITE sync. Hope it's a
+	 * no-op.
+	 */
+	vmw_bo_dma_sync(&ddirty->buf->base, BUS_DMASYNC_PREWRITE);
+#endif
+
 	cmd->header.id = SVGA_3D_CMD_SURFACE_DMA;
 	cmd->header.size = sizeof(cmd->body) + blit_size;
 	vmw_bo_get_guest_ptr(&ddirty->buf->base, &cmd->body.guest.ptr);
@@ -1221,6 +1230,10 @@ static uint32_t vmw_stdu_bo_populate_dma(struct vmw_du_update_plane  *update,
 	cmd_dma->body.host.face = 0;
 	cmd_dma->body.host.mipmap = 0;
 	cmd_dma->body.transfer = SVGA3D_WRITE_HOST_VRAM;
+
+#if defined(__NetBSD__)
+	vmw_bo_dma_sync(&vfbbo->buffer->base, BUS_DMASYNC_PREWRITE);
+#endif
 
 	return sizeof(*cmd_dma);
 }

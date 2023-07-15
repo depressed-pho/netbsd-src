@@ -521,6 +521,9 @@ drm_fop_mmap(struct file *fp, off_t *offp, size_t len, int prot, int *flagsp,
 
 	KASSERT(fp == file->filp);
 	KASSERT(len > 0);
+	KASSERTMSG(dev->driver->mmap_object,
+	    "device %s does not implement mmap_object()",
+	    device_xname(dev->dev));
 
 	/* XXX errno Linux->NetBSD */
 	error = -(*dev->driver->mmap_object)(dev, *offp, len, prot, uobjp,

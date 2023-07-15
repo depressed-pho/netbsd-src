@@ -147,6 +147,15 @@ static int vmw_overlay_send_put(struct vmw_private *dev_priv,
 	for (i = 0; i < num_items; i++)
 		items[i].registerId = i;
 
+#if defined(__NetBSD__)
+	/*
+	 * We aren't going to wait for the completion of this command,
+	 * which means we can't perform a POSTWRITE sync. Hope it's a
+	 * no-op.
+	 */
+	vmw_bo_dma_sync(&buf->base, BUS_DMASYNC_PREWRITE);
+#endif
+
 	vmw_bo_get_guest_ptr(&buf->base, &ptr);
 	ptr.offset += arg->offset;
 

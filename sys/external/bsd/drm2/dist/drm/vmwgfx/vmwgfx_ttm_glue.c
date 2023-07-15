@@ -32,6 +32,18 @@ __KERNEL_RCSID(0, "$NetBSD: vmwgfx_ttm_glue.c,v 1.3 2021/12/18 23:45:45 riastrad
 
 #include "vmwgfx_drv.h"
 
+#if defined(__NetBSD__)
+int
+vmw_mmap_object(struct drm_device *dev, off_t offset, size_t size,
+		   vm_prot_t prot, struct uvm_object **uobjp, voff_t *uoffsetp,
+		   struct file *file)
+{
+	struct vmw_private* const dev_priv = vmw_priv(dev);
+
+	return ttm_bo_mmap_object(&dev_priv->bdev, offset, size, prot,
+	    uobjp, uoffsetp, file);
+}
+#else
 int vmw_mmap(struct file *filp, struct vm_area_struct *vma)
 {
 	static const struct vm_operations_struct vmw_vm_ops = {
@@ -56,6 +68,7 @@ int vmw_mmap(struct file *filp, struct vm_area_struct *vma)
 
 	return 0;
 }
+#endif
 
 /* struct vmw_validation_mem callback */
 static int vmw_vmt_reserve(struct vmw_validation_mem *m, size_t size)

@@ -96,7 +96,6 @@ static bool __ttm_read_trylock(struct ttm_lock *lock, bool *locked)
 
 	*locked = false;
 
-	spin_lock(&lock->lock);
 	if (lock->rw >= 0 && lock->flags == 0) {
 		++lock->rw;
 		block = false;
@@ -104,7 +103,6 @@ static bool __ttm_read_trylock(struct ttm_lock *lock, bool *locked)
 	} else if (lock->flags == 0) {
 		block = false;
 	}
-	spin_unlock(&lock->lock);
 
 	return !block;
 }
@@ -143,7 +141,6 @@ static bool __ttm_write_lock(struct ttm_lock *lock)
 {
 	bool locked = false;
 
-	spin_lock(&lock->lock);
 	if (lock->rw == 0 && ((lock->flags & ~TTM_WRITE_LOCK_PENDING) == 0)) {
 		lock->rw = -1;
 		lock->flags &= ~TTM_WRITE_LOCK_PENDING;
@@ -151,7 +148,6 @@ static bool __ttm_write_lock(struct ttm_lock *lock)
 	} else {
 		lock->flags |= TTM_WRITE_LOCK_PENDING;
 	}
-	spin_unlock(&lock->lock);
 	return locked;
 }
 

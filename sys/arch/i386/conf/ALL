@@ -622,6 +622,9 @@ radeondrmkmsfb* at radeonfbbus?
 nouveau*	at pci? dev ? function ?
 nouveaufb*	at nouveaufbbus?
 
+vmwgfx*		at pci? dev ? function ?
+vmwgfxfb*	at vmwgfxfbbus?
+
 # DRMUMS drivers
 viadrmums*	at drm?
 

@@ -77,6 +77,19 @@ struct vmw_bo_dirty {
 	unsigned long bitmap[0];
 };
 
+#if defined(__NetBSD__)
+void
+vmw_bo_dirty__mark_everywhere_as_dirty(struct vmw_bo_dirty *dirty)
+{
+	KASSERT(dirty);
+
+	dirty->start = 0;
+	dirty->end = dirty->bitmap_size;
+	bitmap_set(&dirty->bitmap[0], 0, dirty->bitmap_size);
+}
+#endif
+
+#if !defined(__NetBSD__)
 /**
  * vmw_bo_dirty_scan_pagetable - Perform a pagetable scan for dirty bits
  * @vbo: The buffer object to scan
@@ -159,6 +172,26 @@ static void vmw_bo_dirty_scan_mkwrite(struct vmw_buffer_object *vbo)
 		dirty->change_count = 0;
 	}
 }
+#endif
+
+#if defined(__NetBSD__)
+static void
+vmw_bo_dirty_page_protect(struct vmw_buffer_object *vbo,
+			  pgoff_t start, pgoff_t end, vm_prot_t prot)
+{
+	const struct ttm_buffer_object *bo = &vbo->base;
+	KASSERT(bo->ttm != NULL);
+	KASSERT(start >= 0);
+	KASSERT(end <= bo->ttm->num_pages);
+
+	rw_enter(bo->uvmobj.vmobjlock, RW_WRITER);
+	for (size_t i = start; i < end; i++) {
+		if (__predict_true(bo->ttm->pages[i]))
+			pmap_page_protect(&bo->ttm->pages[i]->p_vmp, prot);
+	}
+	rw_exit(bo->uvmobj.vmobjlock);
+}
+#endif
 
 /**
  * vmw_bo_dirty_scan - Scan for dirty pages and add them to the dirty
@@ -171,12 +204,21 @@ void vmw_bo_dirty_scan(struct vmw_buffer_object *vbo)
 {
 	struct vmw_bo_dirty *dirty = vbo->dirty;
 
+#if defined(__NetBSD__)
+	/* Write-protect pages written to so that consecutive write
+	 * accesses will trigger a fault. */
+	if (dirty->start < dirty->end)
+		vmw_bo_dirty_page_protect(vbo, dirty->start, dirty->end,
+		    VM_PROT_READ);
+#else
 	if (dirty->method == VMW_BO_DIRTY_PAGETABLE)
 		vmw_bo_dirty_scan_pagetable(vbo);
 	else
 		vmw_bo_dirty_scan_mkwrite(vbo);
+#endif
 }
 
+#if !defined(__NetBSD__)
 /**
  * vmw_bo_dirty_pre_unmap - write-protect and pick up dirty pages before
  * an unmap_mapping_range operation.
@@ -204,6 +246,7 @@ static void vmw_bo_dirty_pre_unmap(struct vmw_buffer_object *vbo,
 					  &dirty->bitmap[0], &dirty->start,
 					  &dirty->end);
 }
+#endif
 
 /**
  * vmw_bo_dirty_unmap - Clear all ptes pointing to a range within a bo
@@ -216,12 +259,16 @@ static void vmw_bo_dirty_pre_unmap(struct vmw_buffer_object *vbo,
 void vmw_bo_dirty_unmap(struct vmw_buffer_object *vbo,
 			pgoff_t start, pgoff_t end)
 {
+#if defined(__NetBSD__)
+	vmw_bo_dirty_page_protect(vbo, start, end, VM_PROT_NONE);
+#else
 	unsigned long offset = drm_vma_node_start(&vbo->base.base.vma_node);
 	struct address_space *mapping = vbo->base.bdev->dev_mapping;
 
 	vmw_bo_dirty_pre_unmap(vbo, start, end);
 	unmap_shared_mapping_range(mapping, (offset + start) << PAGE_SHIFT,
 				   (loff_t) (end - start) << PAGE_SHIFT);
+#endif
 }
 
 /**
@@ -269,6 +316,17 @@ int vmw_bo_dirty_add(struct vmw_buffer_object *vbo)
 	dirty->start = dirty->bitmap_size;
 	dirty->end = 0;
 	dirty->ref_count = 1;
+#if defined(__NetBSD__)
+	/*
+	 * Let's just assume that the entire buffer is initially dirty and
+	 * writing to anywhere in the buffer dirtifies its entirety. We
+	 * don't have clean_record_shared_mapping_range() nor struct
+	 * address_space, also... is this whole dirtiness-tracking dance
+	 * something an individual driver should implement? Seriously? It's
+	 * so annoying. Why did they not do it in the DRM/KMS framework?
+	 */
+	vmw_bo_dirty__mark_everywhere_as_dirty(dirty);
+#else
 	if (num_pages < PAGE_SIZE / sizeof(pte_t)) {
 		dirty->method = VMW_BO_DIRTY_PAGETABLE;
 	} else {
@@ -284,6 +342,7 @@ int vmw_bo_dirty_add(struct vmw_buffer_object *vbo)
 						  &dirty->bitmap[0],
 						  &dirty->start, &dirty->end);
 	}
+#endif
 
 	vbo->dirty = dirty;
 
@@ -395,6 +454,7 @@ void vmw_bo_dirty_clear_res(struct vmw_resource *res)
 		dirty->end = res_start;
 }
 
+#if !defined(__NetBSD__)
 vm_fault_t vmw_bo_vm_mkwrite(struct vm_fault *vmf)
 {
 	struct vm_area_struct *vma = vmf->vma;
@@ -491,3 +551,4 @@ out_unlock:
 
 	return ret;
 }
+#endif

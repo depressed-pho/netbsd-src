@@ -559,6 +559,9 @@ radeondrmkmsfb* at radeonfbbus?
 nouveau*	at pci? dev ? function ?
 nouveaufb*	at nouveaufbbus?
 
+#vmwgfx*	at pci? dev ? function ?
+#vmwgfxfb*	at vmwgfxfbbus?
+
 # DRMUMS drivers -- make them loadable, but not statically linked in
 options 	DRM_LEGACY
 #viadrmums*	at drm?

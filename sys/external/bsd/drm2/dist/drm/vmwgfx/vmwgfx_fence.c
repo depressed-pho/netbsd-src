@@ -190,92 +190,42 @@ static long vmw_fence_wait(struct dma_fence *f, bool intr, signed long timeout)
 	struct vmw_fence_manager *fman = fman_from_fence(fence);
 	struct vmw_private *dev_priv = fman->dev_priv;
 	struct vmwgfx_wait_cb cb;
-	long ret = timeout;
+	long ret;
 
 	if (likely(vmw_fence_obj_signaled(fence)))
 		return timeout;
 
+	DRM_INIT_WAITQUEUE(&cb.wq, "vmwgfxwf");
+
 	vmw_fifo_ping_host(dev_priv, SVGA_SYNC_GENERIC);
 	vmw_seqno_waiter_add(dev_priv);
 
-	spin_lock(f->lock);
-
-	if (test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &f->flags))
-		goto out;
-
-	if (intr && signal_pending(current)) {
-		ret = -ERESTARTSYS;
+	if (likely(vmw_fence_obj_signaled(fence))) {
+		ret = timeout;
 		goto out;
 	}
 
-#ifdef __NetBSD__
-	DRM_INIT_WAITQUEUE(&cb.wq, "vmwgfxwf");
-#else
-	cb.task = current;
-#endif
-	spin_unlock(f->lock);
 	ret = dma_fence_add_callback(f, &cb.base, vmwgfx_wait_cb);
-	spin_lock(f->lock);
-	if (ret)
+	if (ret) {
+		ret = timeout;
 		goto out;
+	}
 
-#ifdef __NetBSD__
 #define	C	(__vmw_fences_update(fman), dma_fence_is_signaled_locked(f))
+	spin_lock(f->lock);
 	if (intr) {
 		DRM_SPIN_TIMED_WAIT_UNTIL(ret, &cb.wq, f->lock, timeout, C);
 	} else {
 		DRM_SPIN_TIMED_WAIT_NOINTR_UNTIL(ret, &cb.wq, f->lock, timeout,
 		    C);
 	}
-#else
-	for (;;) {
-		__vmw_fences_update(fman);
-
-		/*
-		 * We can use the barrier free __set_current_state() since
-		 * DMA_FENCE_FLAG_SIGNALED_BIT + wakeup is protected by the
-		 * fence spinlock.
-		 */
-		if (intr)
-			__set_current_state(TASK_INTERRUPTIBLE);
-		else
-			__set_current_state(TASK_UNINTERRUPTIBLE);
-
-		if (test_bit(DMA_FENCE_FLAG_SIGNALED_BIT, &f->flags)) {
-			if (ret == 0 && timeout > 0)
-				ret = 1;
-			break;
-		}
-
-		if (intr && signal_pending(current)) {
-			ret = -ERESTARTSYS;
-			break;
-		}
-
-		if (ret == 0)
-			break;
-
-		spin_unlock(f->lock);
-
-		ret = schedule_timeout(ret);
-
-		spin_lock(f->lock);
-	}
-	__set_current_state(TASK_RUNNING);
-	if (!list_empty(&cb.base.node))
-		list_del(&cb.base.node);
-#endif
 	spin_unlock(f->lock);
+
 	dma_fence_remove_callback(f, &cb.base);
-	spin_lock(f->lock);
 
-out:
-	spin_unlock(f->lock);
-#ifdef __NetBSD__
+out:    vmw_seqno_waiter_remove(dev_priv);
+
 	DRM_DESTROY_WAITQUEUE(&cb.wq);
-#endif
-
-	vmw_seqno_waiter_remove(dev_priv);
 
 	return ret;
 }
@@ -507,13 +457,33 @@ static void __vmw_fences_update(struct vmw_fence_manager *fman)
 	bool needs_rerun;
 	uint32_t seqno, new_seqno;
 	u32 *fifo_mem = fman->dev_priv->mmio_virt;
+	struct list_head to_put = LIST_HEAD_INIT(to_put);
 
 	seqno = vmw_mmio_read(fifo_mem + SVGA_FIFO_FENCE);
 rerun:
 	list_for_each_entry_safe(fence, next_fence, &fman->fence_list, head) {
 		if (seqno - fence->base.seqno < VMW_FENCE_WRAP) {
+			/*
+			 * This code is seriously hard to
+			 * comprehend. fman->fence_list does not retain a
+			 * refcount of fences, yet still expects they won't
+			 * be destroyed as long as they are in
+			 * fman->fence_list. The code guarantees this by
+			 * locking fman->lock before removing fences from
+			 * the list (cf. vmw_fence_obj_destroy()) but this
+			 * means the list can hold fences whose refcount
+			 * already went down to zero even though they
+			 * aren't destroyed yet. Note that the reason why
+			 * it assumes the fence is already locked here, is
+			 * that fence->base.lock and fman->lock are in fact
+			 * the same mutex.
+			 */
 			list_del_init(&fence->head);
-			dma_fence_signal_locked(&fence->base);
+			if (dma_fence_get_rcu(&fence->base) != NULL) {
+				list_add(&fence->head, &to_put);
+				dma_fence_signal_locked(&fence->base);
+			}
+
 			INIT_LIST_HEAD(&action_list);
 			list_splice_init(&fence->seq_passed_actions,
 					 &action_list);
@@ -539,6 +509,14 @@ rerun:
 
 	if (!list_empty(&fman->cleanup_list))
 		(void) schedule_work(&fman->work);
+
+	while ((fence = list_first_entry_or_null(
+		    &to_put, typeof(*fence), head)) != NULL) {
+		list_del_init(&fence->head);
+		spin_unlock(&fman->lock);
+		dma_fence_put(&fence->base);
+		spin_lock(&fman->lock);
+	}
 }
 
 void vmw_fences_update(struct vmw_fence_manager *fman)
@@ -770,7 +748,14 @@ void vmw_fence_fifo_down(struct vmw_fence_manager *fman)
 		struct vmw_fence_obj *fence =
 			list_entry(fman->fence_list.prev, struct vmw_fence_obj,
 				   head);
-		dma_fence_get(&fence->base);
+		/*
+		 * fman->fence_list doesn't hold fences. The refcount might
+		 * have become zero at this point.
+		 */
+		if (dma_fence_get_rcu(&fence->base) == NULL) {
+			list_del_init(&fence->head);
+			continue;
+		}
 		spin_unlock(&fman->lock);
 
 		ret = vmw_fence_obj_wait(fence, false, false,

@@ -41,6 +41,7 @@
 
 #include <drm/drm_auth.h>
 #include <drm/drm_device.h>
+#include <drm/drm_drv.h>
 #include <drm/drm_file.h>
 #include <drm/drm_hashtab.h>
 #include <drm/drm_rect.h>
@@ -313,7 +314,16 @@ enum vmw_dma_map_mode {
 struct vmw_sg_table {
 	enum vmw_dma_map_mode mode;
 	struct page **pages;
+#if defined(__NetBSD__)
+	/*
+	 * One cannot rely on these values in .sgt, as it is only valid for
+	 * vmw_dma_map_bind and vmw_dma_map_populate.
+	 */
+	bus_dma_tag_t dmat;
+	bus_dmamap_t dmap;
+#else
 	const dma_addr_t *addrs;
+#endif
 	struct sg_table *sgt;
 	unsigned long num_regions;
 	unsigned long num_pages;
@@ -335,8 +345,11 @@ struct vmw_sg_table {
  */
 struct vmw_piter {
 	struct page **pages;
+#if defined(__NetBSD__)
+	bus_dma_tag_t dmat;
+	bus_dmamap_t dmap;
+#else
 	const dma_addr_t *addrs;
-#ifndef __NetBSD__		/* XXX */
 	struct sg_dma_page_iter iter;
 #endif
 	unsigned long i;
@@ -515,7 +528,11 @@ struct vmw_private {
 	 * Framebuffer info.
 	 */
 
+#if defined(__NetBSD__)
+	struct vmw_fbdev *fbdev;
+#else
 	void *fb_info;
+#endif
 	enum vmw_display_unit_type active_display_unit;
 	struct vmw_legacy_display *ldu_priv;
 	struct vmw_overlay *overlay_priv;
@@ -851,6 +868,12 @@ extern void vmw_bo_swap_notify(struct ttm_buffer_object *bo);
 extern struct vmw_buffer_object *
 vmw_user_bo_noref_lookup(struct ttm_object_file *tfile, u32 handle);
 
+#if defined(__NetBSD__)
+extern void vmw_bo_dma_sync(struct ttm_buffer_object *bo, int ops);
+extern void vmw_ttm_dma_sync(struct ttm_tt *ttm, int ops);
+extern void vmw_bo_dirty__mark_everywhere_as_dirty(struct vmw_bo_dirty *dirty);
+#endif
+
 /**
  * vmw_user_bo_noref_release - release a buffer object pointer looked up
  * without reference
@@ -971,7 +994,7 @@ extern int vmw_fifo_flush(struct vmw_private *dev_priv,
 #ifdef __NetBSD__
 struct uvm_object;
 extern int vmw_mmap_object(struct drm_device *, off_t, size_t, vm_prot_t,
-    struct uvm_object **, voff_t, struct file *);
+    struct uvm_object **, voff_t *, struct file *);
 #else
 extern int vmw_mmap(struct file *filp, struct vm_area_struct *vma);
 #endif
@@ -1086,6 +1109,9 @@ extern int vmw_wait_seqno(struct vmw_private *dev_priv, bool lazy,
 			  unsigned long timeout);
 extern int vmw_irq_install(struct drm_device *dev, int irq);
 extern void vmw_irq_uninstall(struct drm_device *dev);
+#if defined(__NetBSD__)
+extern irqreturn_t vmw_irq_handler(DRM_IRQ_ARGS);
+#endif
 extern bool vmw_seqno_passed(struct vmw_private *dev_priv,
 				uint32_t seqno);
 extern int vmw_fallback_wait(struct vmw_private *dev_priv,
@@ -1477,14 +1503,7 @@ void vmw_bo_dirty_clear_res(struct vmw_resource *res);
 void vmw_bo_dirty_release(struct vmw_buffer_object *vbo);
 void vmw_bo_dirty_unmap(struct vmw_buffer_object *vbo,
 			pgoff_t start, pgoff_t end);
-#ifdef __NetBSD__
-struct uvm_fault_info;
-struct vm_page;
-int vmw_bo_vm_fault(struct uvm_fault_info *, vaddr_t, struct vm_page **,
-    int, int, vm_prot_t, int);
-int vmw_bo_vm_mkwrite(struct uvm_fault_info *, vaddr_t, struct vm_page **,
-    int, int, vm_prot_t, int);
-#else
+#if !defined(__NetBSD__)
 vm_fault_t vmw_bo_vm_fault(struct vm_fault *vmf);
 vm_fault_t vmw_bo_vm_mkwrite(struct vm_fault *vmf);
 #endif

@@ -329,6 +329,26 @@ void vmw_bo_get_guest_ptr(const struct ttm_buffer_object *bo,
 	}
 }
 
+#if defined(__NetBSD__)
+/**
+ * Perform pre- and post-DMA operation cache and/or buffer synchronization.
+ * Call this before passing the guest pointer to the device with
+ * vmw_bo_get_guest_ptr().
+ *
+ * @bo: Pointer to a struct ttm_buffer_object. Must be pinned or reserved.
+ * @ops: See bus_dmamap_sync(9).
+ */
+void
+vmw_bo_dma_sync(struct ttm_buffer_object *bo, int ops)
+{
+	struct ttm_tt* const ttm = bo->ttm; /* XXX: Should we lock something somehow? */
+
+	if (bo->mem.mem_type != TTM_PL_VRAM) {
+		vmw_ttm_dma_sync(ttm, ops);
+	}
+}
+#endif
+
 
 /**
  * vmw_bo_pin_reserved - Pin or unpin a buffer object without moving it.

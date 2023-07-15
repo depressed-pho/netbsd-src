@@ -154,6 +154,15 @@ static int vmw_sou_fifo_create(struct vmw_private *dev_priv,
 	sou->base.set_gui_x = cmd->obj.root.x;
 	sou->base.set_gui_y = cmd->obj.root.y;
 
+#if defined(__NetBSD__)
+	/*
+	 * We aren't going to wait for the completion of this command,
+	 * which means we can't perform a POSTWRITE sync. Hope it's a
+	 * no-op.
+	 */
+	vmw_bo_dma_sync(&sou->buffer->base, BUS_DMASYNC_PREWRITE);
+#endif
+
 	/* Ok to assume that buffer is pinned in vram */
 	vmw_bo_get_guest_ptr(&sou->buffer->base, &cmd->obj.backingStore.ptr);
 	cmd->obj.backingStore.pitch = mode->hdisplay * 4;
@@ -499,6 +508,10 @@ static uint32_t vmw_sou_bo_define_gmrfb(struct vmw_du_update_plane *update,
 	gmr->body.format.reserved = 0;
 	gmr->body.bytesPerLine = update->vfb->base.pitches[0];
 	vmw_bo_get_guest_ptr(&vfbbo->buffer->base, &gmr->body.ptr);
+
+#if defined(__NetBSD__)
+	vmw_bo_dma_sync(&vfbbo->buffer->base, BUS_DMASYNC_PREWRITE);
+#endif
 
 	return sizeof(*gmr);
 }
@@ -1002,6 +1015,15 @@ static int do_bo_define_gmrfb(struct vmw_private *dev_priv,
 	cmd = VMW_FIFO_RESERVE(dev_priv, sizeof(*cmd));
 	if (!cmd)
 		return -ENOMEM;
+
+#if defined(__NetBSD__)
+	/*
+	 * We aren't going to wait for the completion of this command,
+	 * which means we can't perform a POSTWRITE sync. Hope it's a
+	 * no-op.
+	 */
+	vmw_bo_dma_sync(&buf->base, BUS_DMASYNC_PREWRITE);
+#endif
 
 	cmd->header = SVGA_CMD_DEFINE_GMRFB;
 	cmd->body.format.bitsPerPixel = framebuffer->base.format->cpp[0] * 8;

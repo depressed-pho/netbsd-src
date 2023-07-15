@@ -269,12 +269,14 @@ static bool __vmw_piter_non_sg_next(struct vmw_piter *viter)
 	return ++(viter->i) < viter->num_pages;
 }
 
+#if !defined(__NetBSD__)
 static bool __vmw_piter_sg_next(struct vmw_piter *viter)
 {
 	bool ret = __vmw_piter_non_sg_next(viter);
 
 	return __sg_page_iter_dma_next(&viter->iter) && ret;
 }
+#endif
 
 
 /**
@@ -307,13 +309,30 @@ static dma_addr_t __vmw_piter_phys_addr(struct vmw_piter *viter)
 
 static dma_addr_t __vmw_piter_dma_addr(struct vmw_piter *viter)
 {
+#if defined(__NetBSD__)
+	/*
+	 * viter->dmap is created by ttm_sg_tt_alloc_page_directory() in
+	 * ttm_tt.c. It guarantees segments are page-aligned and their
+	 * length is equal to PAGE_SIZE.
+	 */
+	KASSERT(viter->i < viter->dmap->dm_nsegs);
+
+	bus_dma_segment_t *seg = &viter->dmap->dm_segs[viter->i];
+	KASSERT(seg->ds_len == PAGE_SIZE);
+	KASSERT((seg->ds_addr & (PAGE_SIZE - 1)) == 0);
+
+	return seg->ds_addr;
+#else
 	return viter->addrs[viter->i];
+#endif
 }
 
+#if !defined(__NetBSD__)
 static dma_addr_t __vmw_piter_sg_addr(struct vmw_piter *viter)
 {
 	return sg_page_iter_dma_address(&viter->iter);
 }
+#endif
 
 
 /**
@@ -333,6 +352,12 @@ void vmw_piter_start(struct vmw_piter *viter, const struct vmw_sg_table *vsgt,
 	viter->num_pages = vsgt->num_pages;
 	viter->page = &__vmw_piter_non_sg_page;
 	viter->pages = vsgt->pages;
+#if defined(__NetBSD__)
+	viter->next = &__vmw_piter_non_sg_next;
+	viter->dma_address = &__vmw_piter_dma_addr;
+	viter->dmat = vsgt->dmat;
+	viter->dmap = vsgt->dmap;
+#else
 	switch (vsgt->mode) {
 	case vmw_dma_phys:
 		viter->next = &__vmw_piter_non_sg_next;
@@ -353,8 +378,10 @@ void vmw_piter_start(struct vmw_piter *viter, const struct vmw_sg_table *vsgt,
 	default:
 		BUG();
 	}
+#endif
 }
 
+#if !defined(__NetBSD__)
 /**
  * vmw_ttm_unmap_from_dma - unmap  device addresses previsouly mapped for
  * TTM pages
@@ -399,6 +426,7 @@ static int vmw_ttm_map_for_dma(struct vmw_ttm_tt *vmw_tt)
 
 	return 0;
 }
+#endif
 
 /**
  * vmw_ttm_map_dma - Make sure TTM pages are visible to the device
@@ -431,9 +459,18 @@ static int vmw_ttm_map_dma(struct vmw_ttm_tt *vmw_tt)
 	vsgt->mode = dev_priv->map_mode;
 	vsgt->pages = vmw_tt->dma_ttm.ttm.pages;
 	vsgt->num_pages = vmw_tt->dma_ttm.ttm.num_pages;
+#if defined(__NetBSD__)
+	__USE(ctx);
+	__USE(sgl_size);
+	__USE(sgt_size);
+	vsgt->dmat = vmw_tt->dma_ttm.ttm.bdev->dmat;
+	vsgt->dmap = vmw_tt->dma_ttm.dma_address;
+#else
 	vsgt->addrs = vmw_tt->dma_ttm.dma_address;
+#endif
 	vsgt->sgt = &vmw_tt->sgt;
 
+#if !defined(__NetBSD__)
 	switch (dev_priv->map_mode) {
 	case vmw_dma_map_bind:
 	case vmw_dma_map_populate:
@@ -471,6 +508,7 @@ static int vmw_ttm_map_dma(struct vmw_ttm_tt *vmw_tt)
 	default:
 		break;
 	}
+#endif
 
 	old = ~((dma_addr_t) 0);
 	vmw_tt->vsgt.num_regions = 0;
@@ -509,6 +547,9 @@ static void vmw_ttm_unmap_dma(struct vmw_ttm_tt *vmw_tt)
 	if (!vmw_tt->vsgt.sgt)
 		return;
 
+#if defined(__NetBSD__)
+	__USE(dev_priv);
+#else
 	switch (dev_priv->map_mode) {
 	case vmw_dma_map_bind:
 	case vmw_dma_map_populate:
@@ -521,6 +562,7 @@ static void vmw_ttm_unmap_dma(struct vmw_ttm_tt *vmw_tt)
 	default:
 		break;
 	}
+#endif
 	vmw_tt->mapped = false;
 }
 
@@ -667,19 +709,27 @@ static int vmw_ttm_populate(struct ttm_tt *ttm, struct ttm_operation_ctx *ctx)
 	if (ttm->state != tt_unpopulated)
 		return 0;
 
+#if !defined(__NetBSD__)
 	if (dev_priv->map_mode == vmw_dma_alloc_coherent) {
+#endif
 		size_t size =
 			ttm_round_pot(ttm->num_pages * sizeof(dma_addr_t));
 		ret = ttm_mem_global_alloc(glob, size, ctx);
 		if (unlikely(ret != 0))
 			return ret;
 
+#if defined(__NetBSD__)
+		ret = ttm_bus_dma_populate(&vmw_tt->dma_ttm);
+#else
 		ret = ttm_dma_populate(&vmw_tt->dma_ttm, dev_priv->dev->dev,
 					ctx);
+#endif
 		if (unlikely(ret != 0))
 			ttm_mem_global_free(glob, size);
+#if !defined(__NetBSD__)
 	} else
 		ret = ttm_pool_populate(ttm, ctx);
+#endif
 
 	return ret;
 }
@@ -698,15 +748,46 @@ static void vmw_ttm_unpopulate(struct ttm_tt *ttm)
 	}
 
 	vmw_ttm_unmap_dma(vmw_tt);
+#if !defined(__NetBSD__)
 	if (dev_priv->map_mode == vmw_dma_alloc_coherent) {
+#endif
 		size_t size =
 			ttm_round_pot(ttm->num_pages * sizeof(dma_addr_t));
 
+#if defined(__NetBSD__)
+		ttm_bus_dma_unpopulate(&vmw_tt->dma_ttm);
+#else
 		ttm_dma_unpopulate(&vmw_tt->dma_ttm, dev_priv->dev->dev);
+#endif
 		ttm_mem_global_free(glob, size);
+#if !defined(__NetBSD__)
 	} else
 		ttm_pool_unpopulate(ttm);
+#endif
 }
+
+#if defined(__NetBSD__)
+/**
+ * Perform pre- and post-DMA operation cache and/or buffer synchronization.
+ *
+ * @ops: See bus_dmamap_sync(9).
+ */
+void
+vmw_ttm_dma_sync(struct ttm_tt *ttm, int ops)
+{
+	/* XXX: Should we lock something somehow? */
+	struct vmw_ttm_tt *vmw_tt =
+		container_of(ttm, struct vmw_ttm_tt, dma_ttm.ttm);
+
+	if (ttm->state == tt_unpopulated)
+		return;
+
+	struct ttm_dma_tt* const dma_tt = &vmw_tt->dma_ttm;
+
+	bus_dmamap_sync(ttm->bdev->dmat, dma_tt->dma_address,
+	    0, ttm->num_pages << PAGE_SHIFT, ops);
+}
+#endif
 
 static struct ttm_backend_func vmw_ttm_func = {
 	.bind = vmw_ttm_bind,
@@ -794,7 +875,11 @@ static void vmw_evict_flags(struct ttm_buffer_object *bo,
 static int vmw_verify_access(struct ttm_buffer_object *bo, struct file *filp)
 {
 	struct ttm_object_file *tfile =
+#if defined(__NetBSD__)
+		vmw_fpriv((struct drm_file *)filp->f_data)->tfile;
+#else
 		vmw_fpriv((struct drm_file *)filp->private_data)->tfile;
+#endif
 
 	return vmw_user_bo_verify_access(bo, tfile);
 }
@@ -833,6 +918,19 @@ static void vmw_ttm_io_mem_free(struct ttm_bo_device *bdev, struct ttm_mem_reg *
 
 static int vmw_ttm_fault_reserve_notify(struct ttm_buffer_object *bo)
 {
+#if defined(__NetBSD__)
+	struct vmw_buffer_object *vbo =
+		container_of(bo, typeof(*vbo), base);
+
+	/*
+	 * XXX: This should only happen when access_type == VM_PROT_WRITE
+	 * but the signature of the callback isn't helpful enough. We are
+	 * already wasting our CPU time and DMA time by not accurately
+	 * tracking dirtiness, and this makes it even worse.
+	 */
+	if (vbo->dirty)
+		vmw_bo_dirty__mark_everywhere_as_dirty(vbo->dirty);
+#endif
 	return 0;
 }
 
@@ -867,10 +965,21 @@ static void vmw_swap_notify(struct ttm_buffer_object *bo)
 }
 
 
+#if defined(__NetBSD__)
+static const struct uvm_pagerops vmw_uvm_ops = {
+	.pgo_reference = &ttm_bo_uvm_reference,
+	.pgo_detach = &ttm_bo_uvm_detach,
+	.pgo_fault = &ttm_bo_uvm_fault,
+};
+#endif
+
 struct ttm_bo_driver vmw_bo_driver = {
 	.ttm_tt_create = &vmw_ttm_tt_create,
 	.ttm_tt_populate = &vmw_ttm_populate,
 	.ttm_tt_unpopulate = &vmw_ttm_unpopulate,
+#if defined(__NetBSD__)
+	.ttm_uvm_ops = &vmw_uvm_ops,
+#endif
 	.invalidate_caches = vmw_invalidate_caches,
 	.init_mem_type = vmw_init_mem_type,
 	.eviction_valuable = ttm_bo_eviction_valuable,

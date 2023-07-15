@@ -303,6 +303,61 @@ void vmw_cmdbuf_header_free(struct vmw_cmdbuf_header *header)
 	spin_unlock(&man->lock);
 }
 
+#if defined(__NetBSD__)
+static void
+vmw_cmdbuf_header_pre_dma(struct vmw_cmdbuf_header *header)
+{
+	struct vmw_cmdbuf_man *man = header->man;
+
+	if (header->inline_space) {
+		/*
+		 * We know header->cb_header came from the pool
+		 * man->dheaders, and header->cmd is also a part of the
+		 * same block. No need to sync them separately.
+		 */
+		dma_pool_sync(man->dheaders, header->handle,
+		    BUS_DMASYNC_PREREAD | BUS_DMASYNC_PREWRITE);
+	} else {
+		/*
+		 * We know header->cb_header came from the pool
+		 * man->headers, and header->cmd is a separate region
+		 * allocated from man->dmamap. vmw_cmdbuf_ctx_process()
+		 * never reads the payload, only the header, so there is no
+		 * need to perform a PREREAD sync on it.
+		 */
+		dma_pool_sync(man->headers, header->handle,
+		    BUS_DMASYNC_PREWRITE);
+
+		if (man->using_mob)
+			vmw_bo_dma_sync(man->cmd_space, BUS_DMASYNC_PREWRITE);
+		else
+			bus_dmamap_sync(man->dev_priv->dev->dmat, man->dmamap,
+			    header->cmd - man->map, header->size,
+			    BUS_DMASYNC_PREWRITE);
+	}
+}
+
+static void
+vmw_cmdbuf_header_post_dma(struct vmw_cmdbuf_header *header)
+{
+	struct vmw_cmdbuf_man *man = header->man;
+
+	if (header->inline_space) {
+		dma_pool_sync(man->dheaders, header->handle,
+		    BUS_DMASYNC_POSTREAD | BUS_DMASYNC_POSTWRITE);
+	} else {
+		dma_pool_sync(man->headers, header->handle,
+		    BUS_DMASYNC_POSTWRITE);
+
+		if (man->using_mob)
+			vmw_bo_dma_sync(man->cmd_space, BUS_DMASYNC_POSTWRITE);
+		else
+			bus_dmamap_sync(man->dev_priv->dev->dmat, man->dmamap,
+			    header->cmd - man->map, header->size,
+			    BUS_DMASYNC_POSTWRITE);
+	}
+}
+#endif
 
 /**
  * vmw_cmbuf_header_submit: Submit a command buffer to hardware.
@@ -314,12 +369,25 @@ static int vmw_cmdbuf_header_submit(struct vmw_cmdbuf_header *header)
 	struct vmw_cmdbuf_man *man = header->man;
 	u32 val;
 
+#if defined(__NetBSD__)
+	vmw_cmdbuf_header_pre_dma(header);
+#endif
+
 	val = upper_32_bits(header->handle);
 	vmw_write(man->dev_priv, SVGA_REG_COMMAND_HIGH, val);
 
 	val = lower_32_bits(header->handle);
 	val |= header->cb_context & SVGA_CB_CONTEXT_MASK;
 	vmw_write(man->dev_priv, SVGA_REG_COMMAND_LOW, val);
+
+#if defined(__NetBSD__)
+	/*
+	 * Pretend we just completed a DMA. The device sometimes updates
+	 * the status field synchronously without an IRQ, and we need our
+	 * CPU to realize that.
+	 */
+	vmw_cmdbuf_header_post_dma(header);
+#endif
 
 	return header->cb_header->status;
 }
@@ -396,6 +464,10 @@ static void vmw_cmdbuf_ctx_process(struct vmw_cmdbuf_man *man,
 	vmw_cmdbuf_ctx_submit(man, ctx);
 
 	list_for_each_entry_safe(entry, next, &ctx->hw_submitted, list) {
+#if defined(__NetBSD__)
+		vmw_cmdbuf_header_post_dma(entry);
+#endif
+
 		SVGACBStatus status = entry->cb_header->status;
 
 		if (status == SVGA_CB_STATUS_NONE)
@@ -784,14 +856,12 @@ static bool vmw_cmdbuf_try_alloc(struct vmw_cmdbuf_man *man,
 		return true;
 
 	memset(info->node, 0, sizeof(*info->node));
-	spin_lock(&man->lock);
 	ret = drm_mm_insert_node(&man->mm, info->node, info->page_size);
 	if (ret) {
 		vmw_cmdbuf_man_process(man);
 		ret = drm_mm_insert_node(&man->mm, info->node, info->page_size);
 	}
 
-	spin_unlock(&man->lock);
 	info->done = !ret;
 
 	return info->done;
@@ -1277,6 +1347,7 @@ int vmw_cmdbuf_set_pool_size(struct vmw_cmdbuf_man *man,
 		if (error)
 			break;
 		loaded = 1;
+		man->handle = man->dmamap->dm_segs[0].ds_addr;
 	} while (0);
 	if (error) {
 		if (loaded)

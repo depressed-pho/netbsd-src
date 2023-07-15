@@ -500,6 +500,14 @@ static int vmw_legacy_srf_dma(struct vmw_resource *res,
 	if (unlikely(!cmd))
 		return -ENOMEM;
 
+#if defined(__NetBSD__)
+	/*
+	 * XXX: How do we synchronize the buffer, when transfering the
+	 * surface to the backup?
+	 */
+	vmw_bo_dma_sync(val_buf->bo, BUS_DMASYNC_PREWRITE);
+#endif
+
 	vmw_bo_get_guest_ptr(val_buf->bo, &ptr);
 	vmw_surface_dma_encode(srf, cmd, &ptr, bind);
 
