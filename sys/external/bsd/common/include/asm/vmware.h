@@ -41,15 +41,15 @@
 
 /* XXX support vmcall/vmmcall */
 #define	VMWARE_HYPERCALL						      \
-	"movw $"__STRING(VMWARE_HYPERVISOR_PORT)",%%dx;"		      \
+	"movw $"___STRING(VMWARE_HYPERVISOR_PORT)",%%dx;"		      \
 	"inl (%%dx),%%eax;"
 
 #define	VMWARE_HYPERCALL_HB_OUT						      \
-	"movw $"__STRING(VMWARE_HYPERVISOR_PORT_HB)",%%dx;"		      \
+	"movw $"___STRING(VMWARE_HYPERVISOR_PORT_HB)",%%dx;"		      \
 	"rep outsb;"
 
 #define	VMWARE_HYPERCALL_HB_IN						      \
-	"movw $"__STRING(VMWARE_HYPERVISOR_PORT_HB)",%%dx;"		      \
+	"movw $"___STRING(VMWARE_HYPERVISOR_PORT_HB)",%%dx;"		      \
 	"rep insb;"
 
 #endif
