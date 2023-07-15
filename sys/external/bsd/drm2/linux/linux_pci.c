@@ -786,6 +786,32 @@ pci_disable_rom(struct pci_dev *pdev)
 	splx(s);
 }
 
+int
+pci_request_regions(struct pci_dev *pdev __unused, const char *res_name __unused)
+{
+	/* We don't need to do anything, do we? */
+	return 0;
+}
+
+void
+pci_release_regions(struct pci_dev *pdev __unused)
+{
+	/* nop */
+}
+
+int
+pci_request_region(struct pci_dev *pdev __unused, int bar __unused, const char *res_name __unused)
+{
+	/* We don't need to do anything, do we? */
+	return 0;
+}
+
+void
+pci_release_region(struct pci_dev *pdev __unused, int bar __unused)
+{
+	/* nop */
+}
+
 bus_addr_t
 pci_resource_start(struct pci_dev *pdev, unsigned i)
 {
