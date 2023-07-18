@@ -71,8 +71,16 @@ extern cell	board[B_SIZE];
 #define	D_LAST	22
 
 	/* the active area (rows) */
-#define	A_FIRST	1
-#define	A_LAST	21
+#define	A_FIRST_ROW	1
+#define	A_LAST_ROW	21
+#define	A_FIRST_COL	1
+#define	A_LAST_COL	11
+
+	/* appearance of blocks and empty cells */
+#define	CHARS_BLOCK_SO	"[]" /* Used on a terminal with standout mode */
+#define	CHARS_BLOCK	"[]" /* Used on a terminal without standout mode */
+#define	CHARS_BOUNDARY	"  "
+#define	CHARS_EMPTY	"  "
 
 /*
  * Minimum display size.

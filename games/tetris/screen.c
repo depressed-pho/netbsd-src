@@ -43,6 +43,7 @@
 
 #include <setjmp.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -110,6 +111,17 @@ setcolor(int c)
 		buf = tiparm(set_a_foreground, c);
 	if (buf != NULL)
 		putpad(buf);
+}
+
+/*
+ * Return true iff the given row and the column is in the actual playing
+ * area.
+ */
+static bool
+is_in_field(int row, int col)
+{
+	return row >= A_FIRST_ROW && row < A_LAST_ROW &&
+	       col >= A_FIRST_COL && col < A_LAST_COL;
 }
 
 /*
@@ -280,12 +292,6 @@ scr_clear(void)
 	memset((char *)curscreen, 0, sizeof(curscreen));
 }
 
-#if vax && !__GNUC__
-typedef int regcell;	/* pcc is bad at `register char', etc */
-#else
-typedef cell regcell;
-#endif
-
 /*
  * Update the screen.
  */
@@ -293,7 +299,7 @@ void
 scr_update(void)
 {
 	cell *bp, *sp;
-	regcell so, cur_so = 0;
+	cell so, cur_so = 0;
 	int i, ccol, j;
 	sigset_t nsigset, osigset;
 	static const struct shape *lastshape;
@@ -334,9 +340,10 @@ scr_update(void)
 
 		/* draw */
 		setcolor(nextshape->color);
-		putpad(enter_standout_mode);
+		if (enter_standout_mode)
+			putpad(enter_standout_mode);
 		moveto(r, 2*c);
-		putstr("  ");
+		putstr(CHARS_BLOCK);
 		for(i=0; i<3; i++) {
 			t = c + r*B_COLS;
 			t += nextshape->off[i];
@@ -345,9 +352,11 @@ scr_update(void)
 			tc = t % B_COLS;
 
 			moveto(tr, 2*tc);
-			putstr("  ");
+			putstr(enter_standout_mode ?
+			       CHARS_BLOCK_SO : CHARS_BLOCK);
 		}
-		putpad(exit_standout_mode);
+		if (exit_standout_mode)
+			putpad(exit_standout_mode);
 	}
 
 	bp = &board[D_FIRST * B_COLS];
@@ -378,10 +387,19 @@ scr_update(void)
 				snprintf(buf, sizeof(buf), "%d%d", so, so);
 				putstr(buf);
 #else
-				putstr("  ");
+				if (so)
+					putstr(is_in_field(j, i) ?
+					       CHARS_BLOCK_SO : CHARS_BOUNDARY);
+				else
+					putstr(CHARS_EMPTY);
 #endif
-			} else
-				putstr(so ? "XX" : "  ");
+			}
+			else
+				if (so)
+					putstr(is_in_field(j, i) ?
+					       CHARS_BLOCK : CHARS_BOUNDARY);
+				else
+					putstr(CHARS_EMPTY);
 			ccol = i + 1;
 			/*
 			 * Look ahead a bit, to avoid extra motion if

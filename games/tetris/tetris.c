@@ -107,7 +107,7 @@ elide(void)
 	int i, j, base;
 	cell *p;
 
-	for (i = A_FIRST; i < A_LAST; i++) {
+	for (i = A_FIRST_ROW; i < A_LAST_ROW; i++) {
 		base = i * B_COLS + 1;
 		p = &board[base];
 		for (j = B_COLS - 2; *p++ != 0;) {
@@ -216,7 +216,7 @@ main(int argc, char *argv[])
 
 	scr_set();
 
-	pos = A_FIRST*B_COLS + (B_COLS/2)-1;
+	pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
 	nextshape = randshape();
 	curshape = randshape();
 
@@ -250,7 +250,7 @@ main(int argc, char *argv[])
 			 */
 			curshape = nextshape;
 			nextshape = randshape();
-			pos = A_FIRST*B_COLS + (B_COLS/2)-1;
+			pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
 			if (!fits_in(curshape, pos))
 				break;
 			continue;
