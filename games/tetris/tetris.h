@@ -146,9 +146,6 @@ struct shape {
 };
 
 extern const struct shape shapes[];
-#define	randshape() (&shapes[arc4random_uniform(7)])
-
-extern const struct shape *nextshape;
 
 /*
  * Shapes fall at a rate faster than once per second.

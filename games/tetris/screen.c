@@ -55,6 +55,7 @@
 #define sigmask(s) (1 << ((s) - 1))
 #endif
 
+#include "randomizer.h"
 #include "screen.h"
 #include "tetris.h"
 
@@ -296,7 +297,7 @@ scr_clear(void)
  * Update the screen.
  */
 void
-scr_update(void)
+scr_update(struct tetris_rng const *rng)
 {
 	cell *bp, *sp;
 	cell so, cur_so = 0;
@@ -322,6 +323,7 @@ scr_update(void)
 	}
 
 	/* draw preview of nextpattern */
+	struct shape const* nextshape = tetris_rng_peek(rng, 0);
 	if (showpreview && (nextshape != lastshape)) {
 		static int r=5, c=2;
 		int tr, tc, t;

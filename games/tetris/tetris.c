@@ -55,6 +55,7 @@ __COPYRIGHT("@(#) Copyright (c) 1992, 1993\
 #include <unistd.h>
 
 #include "input.h"
+#include "randomizer.h"
 #include "scores.h"
 #include "screen.h"
 #include "tetris.h"
@@ -65,9 +66,6 @@ cell	board[B_SIZE];		/* 0 => empty, otherwise occupied with an
 int	Rows, Cols;		/* current screen size */
 int	Offset;			/* used to center board & shapes */
 
-static const struct shape *curshape;
-const struct shape *nextshape;
-
 long	fallrate;		/* less than 1 million; smaller => faster */
 
 int	score;			/* the obvious thing */
@@ -77,7 +75,7 @@ char	key_msg[100];
 int	showpreview;
 int	nocolor;
 
-static void elide(void);
+static void elide(struct tetris_rng const *rng);
 static void setup_board(void);
 static void onintr(int) __dead;
 static void usage(void) __dead;
@@ -102,7 +100,7 @@ setup_board(void)
  * Elide any full active rows.
  */
 static void
-elide(void)
+elide(struct tetris_rng const *rng)
 {
 	int i, j, base;
 	cell *p;
@@ -114,13 +112,13 @@ elide(void)
 			if (--j <= 0) {
 				/* this row is to be elided */
 				memset(&board[base], 0, B_COLS - 2);
-				scr_update();
+				scr_update(rng);
 				tsleep();
 				while (--base != 0)
 					board[base + B_COLS] = board[base];
 				/* don't forget to clear 0th row */
 				memset(&board[1], 0, B_COLS - 2);
-				scr_update();
+				scr_update(rng);
 				tsleep();
 				break;
 			}
@@ -213,18 +211,18 @@ main(int argc, char *argv[])
 	(void)signal(SIGINT, onintr);
 	scr_init();
 	setup_board();
+	struct tetris_rng* const rng = tetris_rng_alloc(shapes, 7);
 
 	scr_set();
 
 	pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
-	nextshape = randshape();
-	curshape = randshape();
+	struct shape const* curshape = tetris_rng_draw(rng);
 
 	scr_msg(key_msg, 1);
 
 	for (;;) {
 		place(curshape, pos, 1);
-		scr_update();
+		scr_update(rng);
 		place(curshape, pos, 0);
 		c = tgetchar();
 		if (c < 0) {
@@ -242,14 +240,13 @@ main(int argc, char *argv[])
 			 */
 			place(curshape, pos, 1);
 			score++;
-			elide();
+			elide(rng);
 
 			/*
 			 * Choose a new shape.  If it does not fit,
 			 * the game is over.
 			 */
-			curshape = nextshape;
-			nextshape = randshape();
+			curshape = tetris_rng_draw(rng);
 			pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
 			if (!fits_in(curshape, pos))
 				break;
@@ -269,7 +266,7 @@ main(int argc, char *argv[])
 
 			place(curshape, pos, 1);
 			do {
-				scr_update();
+				scr_update(rng);
 				scr_msg(key_msg, 0);
 				scr_msg(msg, 1);
 				(void) fflush(stdout);
@@ -321,6 +318,7 @@ main(int argc, char *argv[])
 		}
 	}
 
+	tetris_rng_free(rng);
 	scr_clear();
 	scr_end();
 
