@@ -55,8 +55,16 @@
 #define	B_ROWS	23
 #define	B_SIZE	(B_ROWS * B_COLS)
 
+	/* 0: empty
+	   1: occupied; red
+	   2: occupied; green
+	   3: occupied; yellow
+	   4: occupied; blue
+	   5: occupied; magenta
+	   6: occupied; cyan
+	   7: occupied; white */
 typedef unsigned char cell;
-extern cell	board[B_SIZE];	/* 1 => occupied, 0 => empty */
+extern cell	board[B_SIZE];
 
 	/* the displayed area (rows) */
 #define	D_FIRST	1

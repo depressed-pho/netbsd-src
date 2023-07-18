@@ -59,7 +59,8 @@ __COPYRIGHT("@(#) Copyright (c) 1992, 1993\
 #include "screen.h"
 #include "tetris.h"
 
-cell	board[B_SIZE];		/* 1 => occupied, 0 => empty */
+cell	board[B_SIZE];		/* 0 => empty, otherwise occupied with an
+				 * ANSI color code (see tetris.h) */
 
 int	Rows, Cols;		/* current screen size */
 int	Offset;			/* used to center board & shapes */
