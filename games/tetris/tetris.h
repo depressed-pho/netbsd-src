@@ -102,8 +102,8 @@ extern int	Offset;		/* vert. offset to center board */
  * A `shape' is the fundamental thing that makes up the game.  There
  * are 7 basic shapes, each consisting of four `blots':
  *
- *	X.X	  X.X		X.X
- *	  X.X	X.X	X.X.X	X.X	X.X.X	X.X.X	X.X.X.X
+ *	X.X	  X.X		  X.X
+ *	  X.X	X.X	X.X.X	  X.X	X.X.X	X.X.X	X.X.X.X
  *			  X		X	    X
  *
  *	  0	  1	  2	  3	  4	  5	  6
@@ -112,7 +112,7 @@ extern int	Offset;		/* vert. offset to center board */
  * This blot is designated (0,0).  The other three blots can then be
  * described as offsets from the center.  Shape 3 is the same under
  * rotation, so its center is effectively irrelevant; it has been chosen
- * so that it `sticks out' upward and leftward.  Except for shape 6,
+ * so that it `sticks out' upward and rightward.  Except for shape 6,
  * all the blots are contained in a box going from (-1,-1) to (+1,+1);
  * shape 6's center `wobbles' as it rotates, so that while it `sticks out'
  * rightward, its rotation---a vertical line---`sticks out' downward.

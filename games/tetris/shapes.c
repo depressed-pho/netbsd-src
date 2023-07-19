@@ -56,7 +56,7 @@ const struct shape shapes[] = {
 	/* 0*/	{ 1,  7,	{ TL, TC, MR, } },	/* Z (red) */
 	/* 1*/	{ 2,  8,	{ TC, TR, ML, } },	/* S (green) */
 	/* 2*/	{ 5,  9,	{ ML, MR, BC, } },	/* T (magenta) */
-	/* 3*/	{ 7,  3,	{ TL, TC, ML, } },	/* O (white) */
+	/* 3*/	{ 7,  3,	{ TC, TR, MR, } },	/* O (white) */
 	/* 4*/	{ 3, 12,	{ ML, BL, MR, } },	/* L (yellow) */
 	/* 5*/	{ 4, 15,	{ ML, BR, MR, } },	/* J (blue) */
 	/* 6*/	{ 6, 18,	{ ML, MR, 2   } },	/* I (cyan) */
