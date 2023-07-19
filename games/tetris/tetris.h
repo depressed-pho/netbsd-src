@@ -141,7 +141,8 @@ extern int	Offset;		/* vert. offset to center board */
  */
 struct shape {
 	int	color;
-	int	rot;	/* index of rotated version of this shape */
+	int	rot_cw;	/* index of clockwise-rotated version of this shape */
+	int	rot_ccw;/* like rot_cw but is for counterclockwise rotation */
 	int	off[3];	/* offsets to other blots if center is at (0,0) */
 };
 
@@ -180,7 +181,6 @@ extern long	fallrate;	/* less than 1 million; smaller => faster */
 extern int	score;		/* the obvious thing */
 extern gid_t	gid, egid;
 
-extern char	key_msg[100];
 extern int	showpreview;
 extern int	nocolor;
 

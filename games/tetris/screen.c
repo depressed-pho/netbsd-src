@@ -40,7 +40,9 @@
 
 #include <sys/cdefs.h>
 #include <sys/ioctl.h>
+#include <sys/param.h>
 
+#include <assert.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -55,6 +57,7 @@
 #define sigmask(s) (1 << ((s) - 1))
 #endif
 
+#include "keymap.h"
 #include "randomizer.h"
 #include "screen.h"
 #include "tetris.h"
@@ -64,6 +67,7 @@ static int curscore;
 static int isset;		/* true => terminal is in game mode */
 static struct termios oldtt;
 static void (*tstp)(int);
+static struct tetris_keymap const* saved_km;
 
 static	void	scr_stop(int);
 static	void	stopset(int) __dead;
@@ -159,26 +163,30 @@ static void
 scr_stop(int sig)
 {
 	sigset_t set;
+	struct tetris_keymap const* km = saved_km;
 
 	scr_end();
 	(void) kill(getpid(), sig);
 	sigemptyset(&set);
 	sigaddset(&set, sig);
 	(void) sigprocmask(SIG_UNBLOCK, &set, (sigset_t *)0);
-	scr_set();
-	scr_msg(key_msg, 1);
+	scr_set(km);
+	scr_msg(tetris_keymap_help(km), 1);
 }
 
 /*
  * Set up screen mode.
  */
 void
-scr_set(void)
+scr_set(struct tetris_keymap const* km)
 {
 	struct winsize ws;
 	struct termios newtt;
 	sigset_t nsigset, osigset;
 	void (*ttou)(int);
+
+	/* Save the key map for signal handlers. */
+	saved_km = km;
 
 	sigemptyset(&nsigset);
 	sigaddset(&nsigset, SIGTSTP);
@@ -269,6 +277,8 @@ scr_end(void)
 	/* restore signals */
 	(void) signal(SIGTSTP, tstp);
 	(void) sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
+
+	saved_km = NULL;
 }
 
 void
@@ -428,25 +438,92 @@ scr_update(struct tetris_rng const *rng)
 	(void) sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
 }
 
+void
+scr_flush_msg(int row, char const* str, int set)
+{
+	if (set || clr_eol == NULL) {
+		ssize_t len = strlen(str);
+		int const col = MAX(((Cols - len) >> 1) - 1, 0);
+
+		moveto(row, col);
+		if (set)
+			putstr(str);
+		else
+			while (--len >= 0)
+				putchar(' ');
+	}
+	else {
+		moveto(row, 0);
+		putpad(clr_eol);
+	}
+}
+
 /*
  * Write a message (set!=0), or clear the same message (set==0).
  * (We need its length in case we have to overwrite with blanks.)
+ *
+ * TAB characters are treated as soft-linebreak. It is rendered as a
+ * sequence of two SPCs as long as the next line delimited by a TAB fits in
+ * the same line. Otherwise it behaves as a linebreak.
  */
 void
-scr_msg(char *s, int set)
+scr_msg(char const *msg, int set)
 {
+	static char const* soft_br = "  ";
+	size_t row = Rows - 2;
+	size_t line_len = 0;
+	bool last_segment_ended_softly = false;
+	char line_buf[Cols + 1];
+	while (*msg != '\0' && row < Rows) {
+		/* Search for the next TAB, LF, or NUL to find out where to
+		 * break the current line. */
+		size_t const segment_len = strcspn(msg, "\t\n");
+		char const sep = msg[segment_len];
 
-	if (set || clr_eol == NULL) {
-		int l = strlen(s);
+		if (last_segment_ended_softly) {
+			/* Does it fit? */
+			if (line_len + strlen(soft_br) + segment_len <= Cols) {
+				strcat(&line_buf[line_len], soft_br);
+				line_len += strlen(soft_br);
 
-		moveto(Rows - 2, ((Cols - l) >> 1) - 1);
-		if (set)
-			putstr(s);
-		else
-			while (--l >= 0)
-				(void) putchar(' ');
-	} else {
-		moveto(Rows - 2, 0);
-		putpad(clr_eol);
+				strncat(&line_buf[line_len], msg, segment_len);
+				line_len += segment_len;
+			}
+			else {
+				/* No. Flush the buffer and break the
+				 * line here. */
+				scr_flush_msg(row, line_buf, set);
+				row++;
+
+				size_t const n = MIN(segment_len, Cols);
+				strncpy(line_buf, msg, n);
+				line_buf[n] = '\0';
+				line_len = n;
+			}
+		}
+		else {
+			assert(line_len == 0);
+			size_t const n = MIN(segment_len, Cols);
+			strncpy(line_buf, msg, n);
+			line_buf[n] = '\0';
+			line_len = n;
+		}
+
+		if (sep == '\t') {
+			/* Don't flush the buffer yet. Try to fit the next
+			 * segment in this line. */
+			last_segment_ended_softly = true;
+		}
+		else {
+			last_segment_ended_softly = false;
+			scr_flush_msg(row, line_buf, set);
+			line_len = 0;
+			row++;
+		}
+
+		msg += segment_len + (sep == '\0' ? 0 : 1);
 	}
+
+	if (line_len > 0 && row < Rows)
+		scr_flush_msg(row, line_buf, set);
 }

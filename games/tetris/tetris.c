@@ -55,6 +55,7 @@ __COPYRIGHT("@(#) Copyright (c) 1992, 1993\
 #include <unistd.h>
 
 #include "input.h"
+#include "keymap.h"
 #include "randomizer.h"
 #include "scores.h"
 #include "screen.h"
@@ -71,7 +72,6 @@ long	fallrate;		/* less than 1 million; smaller => faster */
 int	score;			/* the obvious thing */
 gid_t	gid, egid;
 
-char	key_msg[100];
 int	showpreview;
 int	nocolor;
 
@@ -130,10 +130,7 @@ int
 main(int argc, char *argv[])
 {
 	int pos, c;
-	const char *keys;
 	int level = 2;
-#define NUMKEYS 7
-	char key_write[NUMKEYS][10];
 	char *nocolor_env;
 	int ch, i, j;
 	int fd;
@@ -147,16 +144,14 @@ main(int argc, char *argv[])
 		exit(1);
 	close(fd);
 
-	keys = "jkl pqn";
-
+	char const* keys = "";
 	while ((ch = getopt(argc, argv, "bk:l:ps")) != -1)
 		switch(ch) {
 		case 'b':
 			nocolor = 1;
 			break;
 		case 'k':
-			if (strlen(keys = optarg) != NUMKEYS)
-				usage();
+			keys = optarg;
 			break;
 		case 'l':
 			level = atoi(optarg);
@@ -189,36 +184,19 @@ main(int argc, char *argv[])
 
 	fallrate = 1000000 / level;
 
-	for (i = 0; i <= (NUMKEYS-1); i++) {
-		for (j = i+1; j <= (NUMKEYS-1); j++) {
-			if (keys[i] == keys[j]) {
-				errx(1, "duplicate command keys specified.");
-			}
-		}
-		if (keys[i] == ' ')
-			strcpy(key_write[i], "<space>");
-		else {
-			key_write[i][0] = keys[i];
-			key_write[i][1] = '\0';
-		}
-	}
-
-	snprintf(key_msg, sizeof(key_msg),
-"%s - left  %s - rotate  %s - right  %s - drop  %s - pause  %s - quit  %s - down",
-		key_write[0], key_write[1], key_write[2], key_write[3],
-		key_write[4], key_write[5], key_write[6]);
+	struct tetris_keymap* const km = tetris_keymap_alloc(keys);
 
 	(void)signal(SIGINT, onintr);
 	scr_init();
 	setup_board();
 	struct tetris_rng* const rng = tetris_rng_alloc(shapes, 7);
 
-	scr_set();
+	scr_set(km);
 
 	pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
 	struct shape const* curshape = tetris_rng_draw(rng);
 
-	scr_msg(key_msg, 1);
+	scr_msg(tetris_keymap_help(km), 1);
 
 	for (;;) {
 		place(curshape, pos, 1);
@@ -256,71 +234,67 @@ main(int argc, char *argv[])
 		/*
 		 * Handle command keys.
 		 */
-		if (c == keys[5]) {
-			/* quit */
+		tetris_key_action_t const action = tetris_keymap_get(km, c);
+		if (action == KA_QUIT) {
 			break;
 		}
-		if (c == keys[4]) {
+		else if (action == KA_PAUSE) {
 			static char msg[] =
 			    "paused - press RETURN to continue";
 
 			place(curshape, pos, 1);
 			do {
 				scr_update(rng);
-				scr_msg(key_msg, 0);
+				scr_msg(tetris_keymap_help(km), 0);
 				scr_msg(msg, 1);
 				(void) fflush(stdout);
 			} while (rwait(NULL) == -1);
 			scr_msg(msg, 0);
-			scr_msg(key_msg, 1);
+			scr_msg(tetris_keymap_help(km), 1);
 			place(curshape, pos, 0);
-			continue;
 		}
-		if (c == keys[0]) {
-			/* move left */
+		else if (action == KA_MOVE_LEFT) {
 			if (fits_in(curshape, pos - 1))
 				pos--;
-			continue;
 		}
-		if (c == keys[1]) {
-			/* turn */
-			const struct shape *new = &shapes[curshape->rot];
+		else if (action == KA_ROTATE_CW) {
+			const struct shape *new = &shapes[curshape->rot_cw];
 
 			if (fits_in(new, pos))
 				curshape = new;
-			continue;
 		}
-		if (c == keys[2]) {
-			/* move right */
+		else if (action == KA_ROTATE_CCW) {
+			const struct shape *new = &shapes[curshape->rot_ccw];
+
+			if (fits_in(new, pos))
+				curshape = new;
+		}
+		else if (action == KA_MOVE_RIGHT) {
 			if (fits_in(curshape, pos + 1))
 				pos++;
-			continue;
 		}
-		if (c == keys[3]) {
-			/* move to bottom */
+		else if (action == KA_HARD_DROP) {
 			while (fits_in(curshape, pos + B_COLS)) {
 				pos += B_COLS;
 				score++;
 			}
-			continue;
 		}
-		if (c == keys[6]) {
-			/* move down */
+		else if (action == KA_SOFT_DROP) {
 			if (fits_in(curshape, pos + B_COLS)) {
 				pos += B_COLS;
 				score++;
 			}
-			continue;
 		}
-		if (c == '\f') {
+		else if (c == '\f') {
 			scr_clear();
-			scr_msg(key_msg, 1);
+			scr_msg(tetris_keymap_help(km), 1);
 		}
 	}
 
 	tetris_rng_free(rng);
 	scr_clear();
 	scr_end();
+	tetris_keymap_free(km);
 
 	(void)printf("Your score:  %d point%s  x  level %d  =  %d\n",
 	    score, score == 1 ? "" : "s", level, score * level);

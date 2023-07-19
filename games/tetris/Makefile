@@ -2,7 +2,7 @@
 #	@(#)Makefile	8.1 (Berkeley) 5/31/93
 
 PROG=	tetris
-SRCS=	input.c randomizer.c screen.c shapes.c scores.c tetris.c
+SRCS=	input.c keymap.c randomizer.c screen.c shapes.c scores.c tetris.c
 MAN=	tetris.6
 DPADD=	${LIBTERMINFO}
 LDADD=	-lterminfo
