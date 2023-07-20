@@ -49,6 +49,7 @@ __COPYRIGHT("@(#) Copyright (c) 1992, 1993\
 #include <err.h>
 #include <fcntl.h>
 #include <signal.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,8 +65,8 @@ __COPYRIGHT("@(#) Copyright (c) 1992, 1993\
 cell	board[B_SIZE];		/* 0 => empty, otherwise occupied with an
 				 * ANSI color code (see tetris.h) */
 
-int	Rows, Cols;		/* current screen size */
-int	Offset;			/* used to center board & shapes */
+size_t	Rows, Cols;		/* current screen size */
+size_t	Offset;			/* used to center board & shapes */
 
 long	fallrate;		/* less than 1 million; smaller => faster */
 
@@ -88,12 +89,35 @@ static void usage(void) __dead;
 static void
 setup_board(void)
 {
-	int i;
-	cell *p;
+	memset(board, 0, B_SIZE);
+	for (size_t row = 0; row < B_ROWS; row++)
+		for (size_t col = 0; col < B_COLS; col++)
+			if (row > A_LAST_ROW  ||
+			    col < A_FIRST_COL ||
+			    col > A_LAST_COL)
+				board[row * B_COLS + col] = 7; /* white */
+}
 
-	p = board;
-	for (i = B_SIZE; i; i--)
-		*p++ = (i <= (2 * B_COLS) || (i % B_COLS) < 2) ? 7 : 0;
+static bool
+is_row_full(size_t row)
+{
+	for (size_t col = A_FIRST_COL; col <= A_LAST_COL; col++) {
+		if (board[row * B_COLS + col] == 0) {
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool
+is_row_empty(size_t row)
+{
+	for (size_t col = A_FIRST_COL; col <= A_LAST_COL; col++) {
+		if (board[row * B_COLS + col] != 0) {
+			return false;
+		}
+	}
+	return true;
 }
 
 /*
@@ -102,26 +126,66 @@ setup_board(void)
 static void
 elide(struct tetris_rng const *rng)
 {
-	int i, j, base;
-	cell *p;
+	/* The first step: clear all rows that are full. */
+	bool cleared_any = false;
+	for (size_t row = 0; row <= A_LAST_ROW; row++) {
+		if (is_row_full(row)) {
+			memset(&board[row * B_COLS + A_FIRST_COL], 0, A_COLS);
+			cleared_any = true;
+		}
+	}
 
-	for (i = A_FIRST_ROW; i < A_LAST_ROW; i++) {
-		base = i * B_COLS + 1;
-		p = &board[base];
-		for (j = B_COLS - 2; *p++ != 0;) {
-			if (--j <= 0) {
-				/* this row is to be elided */
-				memset(&board[base], 0, B_COLS - 2);
-				scr_update(rng);
-				tsleep();
-				while (--base != 0)
-					board[base + B_COLS] = board[base];
-				/* don't forget to clear 0th row */
-				memset(&board[1], 0, B_COLS - 2);
-				scr_update(rng);
-				tsleep();
-				break;
+	if (cleared_any) {
+		/* The second step: move rows down to fill gaps. */
+		scr_update(rng);
+		tsleep();
+		for (size_t row = 1; row <= A_LAST_ROW; row++) {
+			if (is_row_empty(row)) {
+				memmove(&board[B_COLS], &board[0], row * B_COLS);
+				memset(&board[A_FIRST_COL], 0, A_COLS);
 			}
+		}
+		scr_update(rng);
+		tsleep();
+	}
+}
+
+/*
+ * Attempt to rotate a shape either clockwise or counterclockwise. Modify
+ * curshape and pos if it succeeds. Also take wall kicks and floor kicks in
+ * account.
+ */
+static void
+try_rotate(struct shape **cur_shape, int *pos, bool cw)
+{
+	struct shape const* const new_shape
+	    = &shapes[cw ? (*cur_shape)->rot_cw : (*cur_shape)->rot_ccw];
+	int const* const off = cw ? (*cur_shape)->off_cw : (*cur_shape)->off_ccw;
+	int const trans = off[0] + off[1] * B_COLS;
+
+	if (fits_in(new_shape, *pos + trans)) {
+		*cur_shape = new_shape;
+		*pos += trans;
+		return;
+	}
+	for (size_t i = 1; i <= (*cur_shape)->max_kick; i++) {
+		/* The basic rotation failed. Try a rightward wall kick. */
+		if (fits_in(new_shape, *pos + trans + i)) {
+			*cur_shape = new_shape;
+			*pos += trans + i;
+			return;
+		}
+		/* It too failed. Try a leftward wall kick. */
+		if (fits_in(new_shape, *pos + trans - i)) {
+			*cur_shape = new_shape;
+			*pos += trans - i;
+			return;
+		}
+		/* It too failed. Try a floor kick. */
+		if (fits_in(new_shape, *pos + trans - i * B_COLS)) {
+			*cur_shape = new_shape;
+			*pos += trans - i * B_COLS;
+			return;
 		}
 	}
 }
@@ -258,16 +322,10 @@ main(int argc, char *argv[])
 				pos--;
 		}
 		else if (action == KA_ROTATE_CW) {
-			const struct shape *new = &shapes[curshape->rot_cw];
-
-			if (fits_in(new, pos))
-				curshape = new;
+			try_rotate(&curshape, &pos, true);
 		}
 		else if (action == KA_ROTATE_CCW) {
-			const struct shape *new = &shapes[curshape->rot_ccw];
-
-			if (fits_in(new, pos))
-				curshape = new;
+			try_rotate(&curshape, &pos, false);
 		}
 		else if (action == KA_MOVE_RIGHT) {
 			if (fits_in(curshape, pos + 1))

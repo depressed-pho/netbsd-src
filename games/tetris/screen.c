@@ -125,8 +125,8 @@ setcolor(int c)
 static bool
 is_in_field(int row, int col)
 {
-	return row >= A_FIRST_ROW && row < A_LAST_ROW &&
-	       col >= A_FIRST_COL && col < A_LAST_COL;
+	return row >= A_FIRST_ROW && row <= A_LAST_ROW &&
+	       col >= A_FIRST_COL && col <= A_LAST_COL;
 }
 
 /*
@@ -218,7 +218,7 @@ scr_set(struct tetris_keymap const* km)
 		    MINCOLS, MINROWS);
 		stop("");	/* stop() supplies \n */
 	}
-	Offset = (Rows - D_LAST + D_FIRST - 2) / 2;
+	Offset = (Rows - (D_ROWS + 2)) / 2;
 	if (tcgetattr(0, &oldtt) < 0)
 		stop("tcgetattr() fails");
 	newtt = oldtt;
@@ -309,9 +309,6 @@ scr_clear(void)
 void
 scr_update(struct tetris_rng const *rng)
 {
-	cell *bp, *sp;
-	cell so, cur_so = 0;
-	int i, ccol, j;
 	sigset_t nsigset, osigset;
 	static const struct shape *lastshape;
 
@@ -320,7 +317,7 @@ scr_update(struct tetris_rng const *rng)
 	(void) sigprocmask(SIG_BLOCK, &nsigset, &osigset);
 
 	/* always leave cursor after last displayed point */
-	curscreen[D_LAST * B_COLS - 1] = -1;
+	curscreen[(D_LAST_ROW + 1) * B_COLS - 1] = -1;
 
 	if (score != curscore) {
 		if (cursor_home)
@@ -348,6 +345,7 @@ scr_update(struct tetris_rng const *rng)
 		moveto(r+2, c-1); putstr("          ");
 
 		moveto(r-3, c-2);
+		setcolor(0);
 		putstr("Next shape:");
 
 		/* draw */
@@ -356,7 +354,7 @@ scr_update(struct tetris_rng const *rng)
 			putpad(enter_standout_mode);
 		moveto(r, 2*c);
 		putstr(CHARS_BLOCK);
-		for(i=0; i<3; i++) {
+		for(int i=0; i<3; i++) {
 			t = c + r*B_COLS;
 			t += nextshape->off[i];
 
@@ -371,20 +369,26 @@ scr_update(struct tetris_rng const *rng)
 			putpad(exit_standout_mode);
 	}
 
-	bp = &board[D_FIRST * B_COLS];
-	sp = &curscreen[D_FIRST * B_COLS];
-	for (j = D_FIRST; j < D_LAST; j++) {
-		ccol = -1;
-		for (i = 0; i < B_COLS; bp++, sp++, i++) {
+	cell cur_so = 0; /* Non-zero if we are currently in standout mode */
+	for (size_t row = D_FIRST_ROW; row <= D_LAST_ROW; row++) {
+		cell* bp = &board[row * B_COLS + D_FIRST_COL];
+		cell* sp = &curscreen[row * B_COLS + D_FIRST_COL];
+		int ccol = -1;
+		for (size_t col = D_FIRST_COL; col <= D_LAST_COL; bp++, sp++, col++) {
+			cell so;
+			/* Skip the cell if it's not been changed since the
+			 * last time we drew it. */
 			if (*sp == (so = *bp))
 				continue;
 			*sp = so;
-			if (i != ccol) {
+			if ((int)col != ccol) {
+				/* This isn't a adjacent to the last cell
+				 * we drew. */
 				if (cur_so && move_standout_mode) {
 					putpad(exit_standout_mode);
 					cur_so = 0;
 				}
-				moveto(RTOD(j + Offset), CTOD(i));
+				moveto(RTOD(row + Offset), CTOD(col));
 			}
 			if (enter_standout_mode) {
 				if (so != cur_so) {
@@ -400,7 +404,7 @@ scr_update(struct tetris_rng const *rng)
 				putstr(buf);
 #else
 				if (so)
-					putstr(is_in_field(j, i) ?
+					putstr(is_in_field(row, col) ?
 					       CHARS_BLOCK_SO : CHARS_BOUNDARY);
 				else
 					putstr(CHARS_EMPTY);
@@ -408,11 +412,11 @@ scr_update(struct tetris_rng const *rng)
 			}
 			else
 				if (so)
-					putstr(is_in_field(j, i) ?
+					putstr(is_in_field(row, col) ?
 					       CHARS_BLOCK : CHARS_BOUNDARY);
 				else
 					putstr(CHARS_EMPTY);
-			ccol = i + 1;
+			ccol = col + 1;
 			/*
 			 * Look ahead a bit, to avoid extra motion if
 			 * we will be redrawing the cell after the next.
@@ -422,11 +426,11 @@ scr_update(struct tetris_rng const *rng)
 			 * the next cell is a different color.
 			 */
 #define	STOP (B_COLS - 3)
-			if (i > STOP || sp[1] != bp[1] || so != bp[1])
+			if (col > STOP || sp[1] != bp[1] || so != bp[1])
 				continue;
 			if (sp[2] != bp[2])
 				sp[1] = -1;
-			else if (i < STOP && so == bp[2] && sp[3] != bp[3]) {
+			else if (col < STOP && so == bp[2] && sp[3] != bp[3]) {
 				sp[2] = -1;
 				sp[1] = -1;
 			}
@@ -438,7 +442,7 @@ scr_update(struct tetris_rng const *rng)
 	(void) sigprocmask(SIG_SETMASK, &osigset, (sigset_t *)0);
 }
 
-void
+static void
 scr_flush_msg(int row, char const* str, int set)
 {
 	if (set || clr_eol == NULL) {

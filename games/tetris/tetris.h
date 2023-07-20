@@ -41,18 +41,18 @@
  */
 
 /*
- * The display (`board') is composed of 23 rows of 12 columns of characters
- * (numbered 0..22 and 0..11), stored in a single array for convenience.
- * Columns 1 to 10 of rows 1 to 20 are the actual playing area, where
- * shapes appear.  Columns 0 and 11 are always occupied, as are all
- * columns of rows 21 and 22.  Rows 0 and 22 exist as boundary areas
+ * The display (`board') is composed of 25 rows of 14 columns of characters
+ * (numbered 0..24 and 0..13), stored in a single array for convenience.
+ * Columns 2 to 11 of rows 3 to 22 are the actual playing area, where
+ * shapes appear.  Columns 0..1 and 12..13 are always occupied, as are all
+ * columns of rows 23 and 24.  Rows 0..2 and 23..24 exist as boundary areas
  * so that regions `outside' the visible area can be examined without
  * worrying about addressing problems.
  */
 
 	/* the board */
-#define	B_COLS	12
-#define	B_ROWS	23
+#define	B_COLS	14
+#define	B_ROWS	25
 #define	B_SIZE	(B_ROWS * B_COLS)
 
 	/* 0: empty
@@ -66,15 +66,21 @@
 typedef unsigned char cell;
 extern cell	board[B_SIZE];
 
-	/* the displayed area (rows) */
-#define	D_FIRST	1
-#define	D_LAST	22
+	/* the displayed area */
+#define	D_ROWS		21
+#define	D_FIRST_ROW	3
+#define	D_LAST_ROW	(D_FIRST_ROW + D_ROWS - 1)
+#define	D_COLS		12
+#define	D_FIRST_COL	1
+#define	D_LAST_COL	(D_FIRST_COL + D_COLS - 1)
 
-	/* the active area (rows) */
-#define	A_FIRST_ROW	1
-#define	A_LAST_ROW	21
-#define	A_FIRST_COL	1
-#define	A_LAST_COL	11
+	/* the active area */
+#define	A_ROWS		20
+#define	A_FIRST_ROW	3
+#define	A_LAST_ROW	(A_FIRST_ROW + A_ROWS - 1)
+#define	A_COLS		10
+#define	A_FIRST_COL	2
+#define	A_LAST_COL	(A_FIRST_COL + A_COLS - 1)
 
 	/* appearance of blocks and empty cells */
 #define	CHARS_BLOCK_SO	"[]" /* Used on a terminal with standout mode */
@@ -88,23 +94,22 @@ extern cell	board[B_SIZE];
 #define	MINROWS	23
 #define	MINCOLS	40
 
-extern int	Rows, Cols;	/* current screen size */
-extern int	Offset;		/* vert. offset to center board */
+extern size_t	Rows, Cols;	/* current screen size */
+extern size_t	Offset;		/* vert. offset to center board */
 
 /*
  * Translations from board coordinates to display coordinates.
  * As with board coordinates, display coordiates are zero origin.
  */
-#define	RTOD(x)	((x) - 1)
-#define	CTOD(x)	((x) * 2 + (((Cols - 2 * B_COLS) >> 1) - 1))
+#define	RTOD(x)	((x) - D_FIRST_ROW)
+#define	CTOD(x)	((x) * 2 + (((Cols - 2 * D_COLS) / 2) - 1))
 
 /*
  * A `shape' is the fundamental thing that makes up the game.  There
  * are 7 basic shapes, each consisting of four `blots':
  *
- *	X.X	  X.X		  X.X
- *	  X.X	X.X	X.X.X	  X.X	X.X.X	X.X.X	X.X.X.X
- *			  X		X	    X
+ *	X.X	  X.X	X.X.X	  X.X	X.X.X	X.X.X	X.X.X.X
+ *	  X.X	X.X	  X	  X.X	X	    X
  *
  *	  0	  1	  2	  3	  4	  5	  6
  *
@@ -112,13 +117,16 @@ extern int	Offset;		/* vert. offset to center board */
  * This blot is designated (0,0).  The other three blots can then be
  * described as offsets from the center.  Shape 3 is the same under
  * rotation, so its center is effectively irrelevant; it has been chosen
- * so that it `sticks out' upward and rightward.  Except for shape 6,
+ * so that it `sticks out' downward and rightward.  Except for shape 6,
  * all the blots are contained in a box going from (-1,-1) to (+1,+1);
  * shape 6's center `wobbles' as it rotates, so that while it `sticks out'
  * rightward, its rotation---a vertical line---`sticks out' downward.
  * The containment box has to include the offset (2,0), making the overall
  * containment box range from offset (-1,-1) to (+2,+1).  (This is why
  * there is only one row above, but two rows below, the display area.)
+ *
+ * The rotations of shapes 2, 4, 5 and 6 are not purely mathematical
+ * rotations. They are actually compositions of rotations and translations.
  *
  * The game works by choosing one of these shapes at random and putting
  * its center at the middle of the first display row (row 1, column 5).
@@ -141,9 +149,18 @@ extern int	Offset;		/* vert. offset to center board */
  */
 struct shape {
 	int	color;
-	int	rot_cw;	/* index of clockwise-rotated version of this shape */
-	int	rot_ccw;/* like rot_cw but is for counterclockwise rotation */
-	int	off[3];	/* offsets to other blots if center is at (0,0) */
+	/* index of clockwise-rotated version of this shape */
+	int	rot_cw;
+	/* like rot_cw but is for counterclockwise rotation */
+	int	rot_ccw;
+	/* (x, y) translation upon rotating clockwise */
+	int	off_cw[2];
+	/* (x, y) translation upon rotating counterclockwise */
+	int	off_ccw[2];
+	/* maximum allowed distance of wall and floor kicks */
+	size_t	max_kick;
+	/* offsets to other blots if center is at (0,0) */
+	int	off[3];
 };
 
 extern const struct shape shapes[];
