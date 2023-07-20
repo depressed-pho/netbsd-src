@@ -35,5 +35,5 @@
  */
 
 int	rwait(struct timeval *);
-int	tgetchar(void);
-void	tsleep(void);
+int	tgetchar(long *timeout);
+void	tsleep(long fallrate);

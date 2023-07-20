@@ -40,6 +40,7 @@
 
 #include <sys/types.h>
 #include <sys/time.h>
+#include <sys/param.h>
 #include <sys/poll.h>
 
 #include <errno.h>
@@ -82,7 +83,7 @@ rwait(struct timeval *tvp)
 	if (tvp) {
 		(void) gettimeofday(&starttv, NILTZ);
 		endtv = *tvp;
-		timeout = tvp->tv_sec * 1000 + tvp->tv_usec / 1000;
+		timeout = MAX(tvp->tv_sec * 1000 + tvp->tv_usec / 1000, 0);
 	} else
 		timeout = INFTIM;
 again:
@@ -91,7 +92,7 @@ again:
 	switch (poll(set, 1, timeout)) {
 
 	case -1:
-		if (tvp == 0)
+		if (tvp == NULL)
 			return (-1);
 		if (errno == EINTR)
 			goto again;
@@ -119,7 +120,7 @@ again:
  * Eat any input that might be available.
  */
 void
-tsleep(void)
+tsleep(long fallrate)
 {
 	struct timeval tv;
 	char c;
@@ -135,28 +136,26 @@ tsleep(void)
  * getchar with timeout.
  */
 int
-tgetchar(void)
+tgetchar(long *timeout)
 {
-	static struct timeval timeleft;
-	char c;
+	struct timeval tv = {
+		.tv_sec = 0,
+		.tv_usec = *timeout
+	};
 
-	/*
-	 * Reset timeleft to fallrate whenever it is not positive.
-	 * In any case, wait to see if there is any input.  If so,
-	 * take it, and update timeleft so that the next call to
-	 * tgetchar() will not wait as long.  If there is no input,
-	 * make timeleft zero or negative, and return -1.
-	 *
-	 * Most of the hard work is done by rwait().
-	 */
-	if (!TV_POS(&timeleft)) {
-		faster();	/* go faster */
-		timeleft.tv_sec = 0;
-		timeleft.tv_usec = fallrate;
+	if (rwait(&tv)) {
+		/*
+		 * There is an input. Take it, and update *timeout so that
+		 * the next call to tgetchar() will not wait as long.
+		 */
+		int c;
+		if (read(0, &c, 1) != 1)
+			stop("end of file, help");
+
+		*timeout = tv.tv_sec * 1000 * 1000 + tv.tv_usec;
+		return (int)(unsigned char)c;
 	}
-	if (!rwait(&timeleft))
-		return (-1);
-	if (read(0, &c, 1) != 1)
-		stop("end of file, help");
-	return ((int)(unsigned char)c);
+	else {
+		return -1;
+	}
 }

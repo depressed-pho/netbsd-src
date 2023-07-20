@@ -68,15 +68,13 @@ cell	board[B_SIZE];		/* 0 => empty, otherwise occupied with an
 size_t	Rows, Cols;		/* current screen size */
 size_t	Offset;			/* used to center board & shapes */
 
-long	fallrate;		/* less than 1 million; smaller => faster */
-
 int	score;			/* the obvious thing */
 gid_t	gid, egid;
 
 int	showpreview;
 int	nocolor;
 
-static void elide(struct tetris_rng const *rng);
+static void elide(struct tetris_rng const *rng, long fallrate);
 static void setup_board(void);
 static void onintr(int) __dead;
 static void usage(void) __dead;
@@ -124,7 +122,7 @@ is_row_empty(size_t row)
  * Elide any full active rows.
  */
 static void
-elide(struct tetris_rng const *rng)
+elide(struct tetris_rng const *rng, long fallrate)
 {
 	/* The first step: clear all rows that are full. */
 	bool cleared_any = false;
@@ -138,7 +136,7 @@ elide(struct tetris_rng const *rng)
 	if (cleared_any) {
 		/* The second step: move rows down to fill gaps. */
 		scr_update(rng);
-		tsleep();
+		tsleep(fallrate);
 		for (size_t row = 1; row <= A_LAST_ROW; row++) {
 			if (is_row_empty(row)) {
 				memmove(&board[B_COLS], &board[0], row * B_COLS);
@@ -146,7 +144,7 @@ elide(struct tetris_rng const *rng)
 			}
 		}
 		scr_update(rng);
-		tsleep();
+		tsleep(fallrate);
 	}
 }
 
@@ -156,7 +154,7 @@ elide(struct tetris_rng const *rng)
  * account.
  */
 static void
-try_rotate(struct shape **cur_shape, int *pos, bool cw)
+try_rotate(struct shape const* *cur_shape, int *pos, bool *floor_kickable, bool cw)
 {
 	struct shape const* const new_shape
 	    = &shapes[cw ? (*cur_shape)->rot_cw : (*cur_shape)->rot_ccw];
@@ -181,10 +179,15 @@ try_rotate(struct shape **cur_shape, int *pos, bool cw)
 			*pos += trans - i;
 			return;
 		}
-		/* It too failed. Try a floor kick. */
-		if (fits_in(new_shape, *pos + trans - i * B_COLS)) {
+		/* It too failed. Try a floor kick if it's
+		 * allowed. Performing a floor kick makes the tetromino
+		 * unable to kick the floor ever again. This is to prevent
+		 * the player from kicking it indefinitely. */
+		if (*floor_kickable &&
+		    fits_in(new_shape, *pos + trans - i * B_COLS)) {
 			*cur_shape = new_shape;
 			*pos += trans - i * B_COLS;
+			*floor_kickable = false;
 			return;
 		}
 	}
@@ -193,10 +196,8 @@ try_rotate(struct shape **cur_shape, int *pos, bool cw)
 int
 main(int argc, char *argv[])
 {
-	int pos, c;
 	int level = 2;
 	char *nocolor_env;
-	int ch, i, j;
 	int fd;
 
 	gid = getgid();
@@ -209,6 +210,7 @@ main(int argc, char *argv[])
 	close(fd);
 
 	char const* keys = "";
+	int ch;
 	while ((ch = getopt(argc, argv, "bk:l:ps")) != -1)
 		switch(ch) {
 		case 'b':
@@ -246,7 +248,10 @@ main(int argc, char *argv[])
 	if (nocolor_env != NULL && nocolor_env[0] != '\0')
 		nocolor = 1;
 
-	fallrate = 1000000 / level;
+	long fallrate = 1000000 / level; /* in microseconds */
+	long timeout = fallrate;
+	bool is_falling = true;
+	bool floor_kickable = true;
 
 	struct tetris_keymap* const km = tetris_keymap_alloc(keys);
 
@@ -257,7 +262,7 @@ main(int argc, char *argv[])
 
 	scr_set(km);
 
-	pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
+	int pos = A_FIRST_ROW*B_COLS + (B_COLS/2)-1;
 	struct shape const* curshape = tetris_rng_draw(rng);
 
 	scr_msg(tetris_keymap_help(km), 1);
@@ -266,13 +271,37 @@ main(int argc, char *argv[])
 		place(curshape, pos, 1);
 		scr_update(rng);
 		place(curshape, pos, 0);
-		c = tgetchar();
+
+		/* Is it touching the floor? */
+		if (fits_in(curshape, pos + B_COLS)) {
+			/* No. Moving tetrominoes may cause it to float in
+			 * the air, even if it was touching the floor
+			 * before that. Switch the timer to fall-delay if
+			 * that's the case. */
+			if (!is_falling) {
+				timeout = fallrate;
+				is_falling = true;
+			}
+		}
+		else {
+			/* Yes. Switch the timer to lock-delay if it wasn't
+			 * previously touching the floor. */
+			if (is_falling) {
+				timeout = tetris_lock_delay(fallrate);
+				is_falling = false;
+			}
+		}
+
+		int c = tgetchar(&timeout);
 		if (c < 0) {
 			/*
 			 * Timeout.  Move down if possible.
 			 */
-			if (fits_in(curshape, pos + B_COLS)) {
+			if (is_falling) {
 				pos += B_COLS;
+				/* Moving a tetromino down resets the
+				 * fall-delay. */
+				timeout = fallrate;
 				continue;
 			}
 
@@ -282,7 +311,14 @@ main(int argc, char *argv[])
 			 */
 			place(curshape, pos, 1);
 			score++;
-			elide(rng);
+			elide(rng, fallrate);
+
+			/* Make the fall-delay timer go faster. */
+			tetris_fallrate_faster(&fallrate);
+
+			/* Tetrominoes are initially allowed to kick the
+			 * floor until they do it once. */
+			floor_kickable = true;
 
 			/*
 			 * Choose a new shape.  If it does not fit,
@@ -322,10 +358,10 @@ main(int argc, char *argv[])
 				pos--;
 		}
 		else if (action == KA_ROTATE_CW) {
-			try_rotate(&curshape, &pos, true);
+			try_rotate(&curshape, &pos, &floor_kickable, true);
 		}
 		else if (action == KA_ROTATE_CCW) {
-			try_rotate(&curshape, &pos, false);
+			try_rotate(&curshape, &pos, &floor_kickable, false);
 		}
 		else if (action == KA_MOVE_RIGHT) {
 			if (fits_in(curshape, pos + 1))
@@ -336,6 +372,10 @@ main(int argc, char *argv[])
 				pos += B_COLS;
 				score++;
 			}
+			/* Hard-drop makes the timer down to zero. The
+			 * dropped tetromino will immediately be locked. */
+			is_falling = false;
+			timeout = 0;
 		}
 		else if (action == KA_SOFT_DROP) {
 			if (fits_in(curshape, pos + B_COLS)) {
@@ -360,6 +400,7 @@ main(int argc, char *argv[])
 
 	printf("\nHit RETURN to see high scores, ^C to skip.\n");
 
+	int i;
 	while ((i = getchar()) != '\n')
 		if (i == EOF)
 			break;

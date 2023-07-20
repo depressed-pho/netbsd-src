@@ -175,8 +175,17 @@ extern const struct shape shapes[];
  * The value eventually reaches a limit, and things stop going faster,
  * but by then the game is utterly impossible.
  */
-extern long	fallrate;	/* less than 1 million; smaller => faster */
-#define	faster() (fallrate -= fallrate / 3000)
+static inline void
+tetris_fallrate_faster(long *fallrate)
+{
+	*fallrate -= *fallrate / 3000;
+}
+
+static inline long
+tetris_lock_delay(long fallrate)
+{
+	return (double)fallrate * 3.0;
+}
 
 /*
  * Game level must be between 1 and 9.  This controls the initial fall rate

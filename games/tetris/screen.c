@@ -256,6 +256,8 @@ scr_end(void)
 {
 	sigset_t nsigset, osigset;
 
+	setcolor(0);
+
 	sigemptyset(&nsigset);
 	sigaddset(&nsigset, SIGTSTP);
 	sigaddset(&nsigset, SIGTTOU);
