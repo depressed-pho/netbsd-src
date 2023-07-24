@@ -684,13 +684,16 @@ vmem_subsystem_init(vmem_t *vm)
 {
 
 	kmem_va_meta_arena = vmem_init(&kmem_va_meta_arena_store, "vmem-va",
-	    0, 0, PAGE_SIZE, vmem_alloc, vmem_free, vm,
+	    0, 0, PAGE_SIZE,
+	    __FPTRCAST(vmem_import_t *, vmem_alloc),
+	    __FPTRCAST(vmem_release_t *, vmem_free), vm,
 	    0, VM_NOSLEEP | VM_BOOTSTRAP | VM_LARGEIMPORT,
 	    IPL_VM);
 
 	kmem_meta_arena = vmem_init(&kmem_meta_arena_store, "vmem-meta",
 	    0, 0, PAGE_SIZE,
-	    uvm_km_kmem_alloc, uvm_km_kmem_free, kmem_va_meta_arena,
+	    __FPTRCAST(vmem_import_t *, uvm_km_kmem_alloc),
+	    __FPTRCAST(vmem_release_t *, uvm_km_kmem_free), kmem_va_meta_arena,
 	    0, VM_NOSLEEP | VM_BOOTSTRAP, IPL_VM);
 
 	pool_init(&vmem_btag_pool, sizeof(bt_t), coherency_unit, 0,
@@ -931,7 +934,7 @@ vmem_t *
 vmem_init(vmem_t *vm, const char *name,
     vmem_addr_t base, vmem_size_t size, vmem_size_t quantum,
     vmem_import_t *importfn, vmem_release_t *releasefn,
-    vmem_t *arg, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
+    void *arg, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
 {
 	int i;
 
@@ -1013,7 +1016,7 @@ vmem_init(vmem_t *vm, const char *name,
 vmem_t *
 vmem_create(const char *name, vmem_addr_t base, vmem_size_t size,
     vmem_size_t quantum, vmem_import_t *importfn, vmem_release_t *releasefn,
-    vmem_t *source, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
+    void *source, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
 {
 
 	KASSERT((flags & (VM_XIMPORT)) == 0);
@@ -1031,7 +1034,7 @@ vmem_create(const char *name, vmem_addr_t base, vmem_size_t size,
 vmem_t *
 vmem_xcreate(const char *name, vmem_addr_t base, vmem_size_t size,
     vmem_size_t quantum, vmem_ximport_t *importfn, vmem_release_t *releasefn,
-    vmem_t *source, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
+    void *source, vmem_size_t qcache_max, vm_flag_t flags, int ipl)
 {
 
 	KASSERT((flags & (VM_XIMPORT)) == 0);

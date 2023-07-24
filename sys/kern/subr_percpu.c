@@ -166,7 +166,7 @@ percpu_cpu_enlarge(size_t size)
  */
 
 static int
-percpu_backend_alloc(vmem_t *dummy, vmem_size_t size, vmem_size_t *resultsize,
+percpu_backend_alloc(void *dummy, vmem_size_t size, vmem_size_t *resultsize,
     vm_flag_t vmflags, vmem_addr_t *addrp)
 {
 	unsigned int offset;

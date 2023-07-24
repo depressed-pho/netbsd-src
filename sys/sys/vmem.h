@@ -45,11 +45,11 @@ typedef size_t vmem_size_t;
 #define	VMEM_ADDR_MIN	0
 #define	VMEM_ADDR_MAX	(~(vmem_addr_t)0)
 
-typedef int	(vmem_import_t)(vmem_t *, vmem_size_t, vm_flag_t,
+typedef int	(vmem_import_t)(void *, vmem_size_t, vm_flag_t,
 		    vmem_addr_t *);
-typedef void	(vmem_release_t)(vmem_t *, vmem_addr_t, vmem_size_t);
+typedef void	(vmem_release_t)(void *, vmem_addr_t, vmem_size_t);
 
-typedef int	(vmem_ximport_t)(vmem_t *, vmem_size_t, vmem_size_t *,
+typedef int	(vmem_ximport_t)(void *, vmem_size_t, vmem_size_t *,
 		    vm_flag_t, vmem_addr_t *);
 
 extern vmem_t *kmem_arena;
@@ -59,13 +59,13 @@ extern vmem_t *kmem_va_arena;
 void		vmem_subsystem_init(vmem_t *vm);
 
 vmem_t *	vmem_create(const char *, vmem_addr_t, vmem_size_t, vmem_size_t,
-		    vmem_import_t *, vmem_release_t *, vmem_t *, vmem_size_t,
+		    vmem_import_t *, vmem_release_t *, void *, vmem_size_t,
 		    vm_flag_t, int);
 vmem_t *	vmem_xcreate(const char *, vmem_addr_t, vmem_size_t,
-		    vmem_size_t, vmem_ximport_t *, vmem_release_t *, vmem_t *,
+		    vmem_size_t, vmem_ximport_t *, vmem_release_t *, void *,
 		    vmem_size_t, vm_flag_t, int);
 vmem_t *	vmem_init(vmem_t *, const char *, vmem_addr_t, vmem_size_t,
-		    vmem_size_t, vmem_import_t *, vmem_release_t *, vmem_t *,
+		    vmem_size_t, vmem_import_t *, vmem_release_t *, void *,
 		    vmem_size_t, vm_flag_t, int);
 void		vmem_destroy(vmem_t *);
 int		vmem_alloc(vmem_t *, vmem_size_t, vm_flag_t, vmem_addr_t *);
