@@ -1226,17 +1226,9 @@ retry:
 		goto retry_strat;
 	}
 #endif
-	if (align != vm->vm_quantum_mask + 1 || phase != 0 || nocross != 0) {
-
-		/*
-		 * XXX should try to import a region large enough to
-		 * satisfy restrictions?
-		 */
-
-		goto fail;
-	}
 	/* XXX eeek, minaddr & maxaddr not respected */
-	if (vmem_import(vm, size, flags) == 0) {
+	const vmem_size_t size_to_import = roundup2(size, align) + phase;
+	if (vmem_import(vm, size_to_import, flags) == 0) {
 		goto retry;
 	}
 	/* XXX */
@@ -1246,7 +1238,7 @@ retry:
 		VMEM_CONDVAR_WAIT(vm);
 		goto retry;
 	}
-fail:
+
 	bt_free(vm, btnew);
 	bt_free(vm, btnew2);
 	VMEM_UNLOCK(vm);
