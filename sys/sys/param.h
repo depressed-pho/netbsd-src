@@ -67,7 +67,7 @@
  *	2.99.9		(299000900)
  */
 
-#define	__NetBSD_Version__	1099000800	/* NetBSD 10.99.8 */
+#define	__NetBSD_Version__	1099000900	/* NetBSD 10.99.9 */
 
 #define __NetBSD_Prereq__(M,m,p) (((((M) * 100000000) + \
     (m) * 1000000) + (p) * 100) <= __NetBSD_Version__)

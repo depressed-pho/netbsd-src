@@ -97,6 +97,12 @@ struct genfb_private {
 	struct splash_info sc_splash;
 #endif
 	struct wsdisplay_accessops sc_accessops;
+	void (*sc_cursor)(void *, int, int, int);
+	void (*sc_putchar)(void *, int, int, u_int, long);
+	void (*sc_copycols)(void *, int, int, int, int);
+	void (*sc_erasecols)(void *, int, int, int, long);
+	void (*sc_copyrows)(void *, int, int, int);
+	void (*sc_eraserows)(void *, int, int, long);
 #if GENFB_GLYPHCACHE > 0
 	/*
 	 * The generic glyphcache code makes a bunch of assumptions that are
@@ -125,7 +131,6 @@ struct genfb_private {
 	 */
 	uint8_t *sc_cache;
 	struct rasops_info sc_cache_ri;
-	void (*sc_putchar)(void *, int, int, u_int, long);
 	int sc_cache_cells;
 	int sc_nbuckets;	/* buckets allocated */
 	gc_bucket *sc_buckets;	/* we allocate as many as we can get into ram */
@@ -150,9 +155,19 @@ static void	genfb_init_palette(struct genfb_softc *);
 static void	genfb_brightness_up(device_t);
 static void	genfb_brightness_down(device_t);
 
+static void	genfb_dirty_chars(struct rasops_info *, unsigned, unsigned,
+			    unsigned, unsigned);
+
+static void	genfb_cursor(void *, int, int, int);
+static void	genfb_putchar(void *, int, int, u_int, long);
+static void	genfb_copycols(void *, int, int, int, int);
+static void	genfb_erasecols(void *, int, int, int, long);
+static void	genfb_copyrows(void *, int, int, int);
+static void	genfb_eraserows(void *, int, int, long);
+
 #if GENFB_GLYPHCACHE > 0
 static int	genfb_setup_glyphcache(struct genfb_softc *, long);
-static void	genfb_putchar(void *, int, int, u_int, long);
+static void	genfb_cached_putchar(void *, int, int, u_int, long);
 #endif
 
 extern const u_char rasops_cmap[768];
@@ -722,10 +737,24 @@ genfb_init_screen(void *cookie, struct vcons_screen *scr,
 	    sc->sc_width / ri->ri_font->fontwidth);
 
 	ri->ri_hw = scr;
-#if GENFB_GLYPHCACHE > 0
 	scp->sc_putchar = ri->ri_ops.putchar;
 	ri->ri_ops.putchar = genfb_putchar;
-#endif
+	if (scp->sc_ops.genfb_dirty_pixels) {
+		/*
+		 * These ops need to be overridden only when our
+		 * framebuffer is in the system memory as opposed to VRAM.
+		 */
+		scp->sc_cursor = ri->ri_ops.cursor;
+		scp->sc_copycols = ri->ri_ops.copycols;
+		scp->sc_erasecols = ri->ri_ops.erasecols;
+		scp->sc_copyrows = ri->ri_ops.copyrows;
+		scp->sc_eraserows = ri->ri_ops.eraserows;
+		ri->ri_ops.cursor = genfb_cursor;
+		ri->ri_ops.copycols = genfb_copycols;
+		ri->ri_ops.erasecols = genfb_erasecols;
+		ri->ri_ops.copyrows = genfb_copyrows;
+		ri->ri_ops.eraserows = genfb_eraserows;
+	}
 #ifdef GENFB_DISABLE_TEXT
 	if (scr == &scp->sc_console_screen && !DISABLESPLASH)
 		SCREEN_DISABLE_DRAWING(&scp->sc_console_screen);
@@ -1013,6 +1042,101 @@ genfb_disable_polling(device_t dev)
 	}
 }
 
+static void
+genfb_dirty_chars(struct rasops_info *ri, unsigned row, unsigned col,
+    unsigned nrows, unsigned ncols)
+{
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	if (__predict_true(scp->sc_ops.genfb_dirty_pixels)) {
+		scp->sc_ops.genfb_dirty_pixels(
+		    sc,
+		    ri->ri_xorigin + col * ri->ri_font->fontwidth,
+		    ri->ri_yorigin + row * ri->ri_font->fontheight,
+		    ncols * ri->ri_font->fontwidth,
+		    nrows * ri->ri_font->fontheight);
+	}
+}
+
+static void
+genfb_cursor(void *cookie, int on, int row, int col)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	scp->sc_cursor(cookie, on, row, col);
+	genfb_dirty_chars(ri, row, col, 1, 1);
+}
+
+static void
+genfb_putchar(void *cookie, int row, int col, u_int c, long attr)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+#if GENFB_GLYPHCACHE > 0
+	__USE(scp);
+	genfb_cached_putchar(cookie, row, col, c, attr);
+#else
+	scp->sc_putchar(cookie, row, col, c, attr);
+#endif
+	genfb_dirty_chars(ri, row, col, 1, 1);
+}
+
+static void
+genfb_copycols(void *cookie, int row, int srccol, int dstcol, int ncols)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	scp->sc_copycols(cookie, row, srccol, dstcol, ncols);
+	genfb_dirty_chars(ri, row, dstcol, 1, ncols);
+}
+
+static void
+genfb_erasecols(void *cookie, int row, int startcol, int ncols, long attr)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	scp->sc_erasecols(cookie, row, startcol, ncols, attr);
+	genfb_dirty_chars(ri, row, startcol, 1, ncols);
+}
+
+static void
+genfb_copyrows(void *cookie, int srcrow, int dstrow, int nrows)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	scp->sc_copyrows(cookie, srcrow, dstrow, nrows);
+	genfb_dirty_chars(ri, dstrow, 0, nrows, ri->ri_cols);
+}
+
+static void
+genfb_eraserows(void *cookie, int startrow, int nrows, long attr)
+{
+	struct rasops_info *ri = cookie;
+	struct vcons_screen *scr = ri->ri_hw;
+	struct genfb_softc *sc = scr->scr_cookie;
+	struct genfb_private *scp = sc->sc_private;
+
+	scp->sc_eraserows(cookie, startrow, nrows, attr);
+	genfb_dirty_chars(ri, startrow, 0, nrows, ri->ri_cols);
+}
+
 #if GENFB_GLYPHCACHE > 0
 #define GLYPHCACHESIZE ((GENFB_GLYPHCACHE) * 1024 * 1024)
 
@@ -1090,7 +1214,7 @@ genfb_setup_glyphcache(struct genfb_softc *sc, long defattr)
 }
 
 static void
-genfb_putchar(void *cookie, int row, int col, u_int c, long attr)
+genfb_cached_putchar(void *cookie, int row, int col, u_int c, long attr)
 {
 	struct rasops_info *ri = cookie;
 	struct vcons_screen *scr = ri->ri_hw;
