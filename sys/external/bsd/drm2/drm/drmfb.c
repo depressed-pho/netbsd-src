@@ -72,6 +72,7 @@ __KERNEL_RCSID(0, "$NetBSD: drmfb.c,v 1.16 2022/09/01 17:54:47 riastradh Exp $")
 static int	drmfb_genfb_ioctl(void *, void *, unsigned long, void *, int,
 		    struct lwp *);
 static paddr_t	drmfb_genfb_mmap(void *, void *, off_t, int);
+static void	drmfb_genfb_dirty_pixels(void *, unsigned, unsigned, unsigned, unsigned);
 static int	drmfb_genfb_enable_polling(void *);
 static int	drmfb_genfb_disable_polling(void *);
 static bool	drmfb_genfb_setmode(struct genfb_softc *, int);
@@ -163,6 +164,13 @@ drmfb_attach(struct drmfb_softc *sc, const struct drmfb_attach_args *da)
 	genfb_ops.genfb_mmap = drmfb_genfb_mmap;
 	genfb_ops.genfb_enable_polling = drmfb_genfb_enable_polling;
 	genfb_ops.genfb_disable_polling = drmfb_genfb_disable_polling;
+	if (da->da_fb_helper->fb->funcs->dirty != NULL) {
+		/*
+		 * This framebuffer is in the system memory. We need to
+		 * accumulate changes and notify the device.
+		 */
+		genfb_ops.genfb_dirty_pixels = drmfb_genfb_dirty_pixels;
+	}
 
 	KERNEL_LOCK(1, NULL);
 	error = genfb_attach(&sc->sc_genfb, &genfb_ops);
@@ -251,6 +259,26 @@ drmfb_genfb_mmap(void *v, void *vs, off_t offset, int prot)
 			return -1;
 		return (*sc->sc_da.da_params->dp_mmap)(sc, offset, prot);
 	}
+}
+
+static void
+drmfb_genfb_dirty_pixels(void *cookie, unsigned x, unsigned y,
+    unsigned width, unsigned height)
+{
+	struct genfb_softc *const genfb = cookie;
+	struct drmfb_softc *const sc = container_of(genfb, struct drmfb_softc,
+	    sc_genfb);
+	struct drm_fb_helper *const helper = sc->sc_da.da_fb_helper;
+	struct drm_clip_rect *const clip = &helper->dirty_clip;
+
+	spin_lock(&helper->dirty_lock);
+	clip->x1 = min_t(u32, clip->x1, x);
+	clip->y1 = min_t(u32, clip->y1, y);
+	clip->x2 = max_t(u32, clip->x2, x + width);
+	clip->y2 = max_t(u32, clip->y2, y + height);
+	spin_unlock(&helper->dirty_lock);
+
+	schedule_work(&helper->dirty_work);
 }
 
 static int
