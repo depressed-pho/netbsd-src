@@ -732,19 +732,15 @@ faultcommon:
 
 	case T_TRCTRAP:
 		/*
-		 * Ignore debug register trace traps due to
+		 * Handle debug register trace traps due to
 		 * accesses in the user's address space, which
 		 * can happen under several conditions such as
 		 * if a user sets a watchpoint on a buffer and
 		 * then passes that buffer to a system call.
-		 * We still want to get TRCTRAPS for addresses
-		 * in kernel space because that is useful when
-		 * debugging the kernel.
 		 */
-		if (x86_dbregs_user_trap())
-			break;
-
-		goto we_re_toast;
+		if (!x86_dbregs_user_trap())
+			goto we_re_toast;
+		/* FALLTHROUGH */
 
 	case T_BPTFLT|T_USER:		/* bpt instruction fault */
 	case T_TRCTRAP|T_USER:		/* trace trap */

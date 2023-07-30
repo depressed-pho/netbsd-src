@@ -47,7 +47,11 @@ static struct dbreg initdbstate;
 	X86_DR6_DR2_BREAKPOINT_CONDITION_DETECTED | \
 	X86_DR6_DR3_BREAKPOINT_CONDITION_DETECTED )
 
-#define X86_GLOBAL_BREAKPOINT	( \
+#define X86_ANY_BREAKPOINTS	( \
+	X86_DR7_LOCAL_DR0_BREAKPOINT | \
+	X86_DR7_LOCAL_DR1_BREAKPOINT | \
+	X86_DR7_LOCAL_DR2_BREAKPOINT | \
+	X86_DR7_LOCAL_DR3_BREAKPOINT | \
 	X86_DR7_GLOBAL_DR0_BREAKPOINT | \
 	X86_DR7_GLOBAL_DR1_BREAKPOINT | \
 	X86_DR7_GLOBAL_DR2_BREAKPOINT | \
@@ -202,9 +206,9 @@ x86_dbregs_user_trap(void)
 	register_t bp;
 
 	dr7 = rdr7();
-	if ((dr7 & X86_GLOBAL_BREAKPOINT) == 0) {
+	if ((dr7 & X86_ANY_BREAKPOINTS) == 0) {
 		/*
-		 * All Global Breakpoint bits are zero, thus the trap couldn't
+		 * All Breakpoint bits are zero, thus the trap couldn't
 		 * have been caused by the hardware debug registers.
 		 */
 		return 0;
