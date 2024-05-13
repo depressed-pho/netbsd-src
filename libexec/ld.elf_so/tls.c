@@ -324,7 +324,7 @@ __tls_get_addr(void *arg_)
 
 	dtv = tcb->tcb_dtv;
 
-	if (__predict_true(idx < DTV_MAX_INDEX(dtv) && dtv[idx] != NULL))
+	if (__predict_true(idx <= DTV_MAX_INDEX(dtv) && dtv[idx] != NULL))
 		return (uint8_t *)dtv[idx] + offset;
 
 	return _rtld_tls_get_addr(tcb, idx, offset);
