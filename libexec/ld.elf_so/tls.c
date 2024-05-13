@@ -73,6 +73,10 @@ _rtld_tls_get_addr(void *tls, size_t idx, size_t offset)
 	if (__predict_false(DTV_GENERATION(dtv) != _rtld_tls_dtv_generation)) {
 		size_t to_copy = DTV_MAX_INDEX(dtv);
 
+		/*
+		 * "2 +" because the first element is the generation and
+		 * the second one is the maximum index.
+		 */
 		new_dtv = xcalloc((2 + _rtld_tls_max_index) * sizeof(*dtv));
 		++new_dtv;
 		if (to_copy > _rtld_tls_max_index)
@@ -131,6 +135,10 @@ _rtld_tls_allocate_locked(void)
 	tcb->tcb_self = tcb;
 #endif
 	dbg(("lwp %d tls tcb %p", _lwp_self(), tcb));
+	/*
+	 * "2 +" because the first element is the generation and the second
+	 * one is the maximum index.
+	 */
 	tcb->tcb_dtv = xcalloc(sizeof(*tcb->tcb_dtv) * (2 + _rtld_tls_max_index));
 	++tcb->tcb_dtv;
 	SET_DTV_MAX_INDEX(tcb->tcb_dtv, _rtld_tls_max_index);

@@ -177,7 +177,7 @@ ENTRY(_rtld_tlsdesc_undef)
 	sub	x0, x0, x1
 
 	ldr	x1, [sp], #16
-	.cfi_adjust_cfa_offset 	-16
+	.cfi_adjust_cfa_offset	-16
 	.cfi_endproc
 	ret
 END(_rtld_tlsdesc_undef)
@@ -211,17 +211,17 @@ ENTRY(_rtld_tlsdesc_dynamic)
 	b.lt	1f			/* Slow path */
 
 	ldr     x3, [x0, x2, lsl #3]	/* dtv[tlsdesc->td_tlsindex] */
-	cbz	x3, 1f
+	cbz	x3, 1f			/* Slow path when dtv[idx] == NULL */
 
 	/* Return (dtv[tlsdesc->td_tlsindex] + tlsdesc->td_tlsoffs - tp) */
 	ldr	x2, [x1, #8]		/* tlsdesc->td_tlsoffs */
-	add 	x2, x2, x3
+	add	x2, x2, x3
 	sub	x0, x2, x4
 
 	/* Restore registers and return */
 	ldp	 x3,  x4, [sp, #(1 * 16)]
 	ldp	 x1,  x2, [sp], #(2 * 16)
-	.cfi_adjust_cfa_offset 	-2 * 16
+	.cfi_adjust_cfa_offset	-2 * 16
 	ret
 
 	/*
@@ -276,7 +276,7 @@ ENTRY(_rtld_tlsdesc_dynamic)
 	ldp	x7, x8,   [sp, #(2 * 16)]
 	ldp	x5, x6,   [sp, #(1 * 16)]
 	ldp	x29, x30, [sp], #(8 * 16)
-	.cfi_adjust_cfa_offset 	-8 * 16
+	.cfi_adjust_cfa_offset	-8 * 16
 	.cfi_restore		x29
 	.cfi_restore		x30
 
