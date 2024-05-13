@@ -208,7 +208,7 @@ ENTRY(_rtld_tlsdesc_dynamic)
 	ldr	x3, [x0, #-8]		/* DTV_MAX_INDEX(dtv) */
 	ldr	x2, [x1, #0]		/* tlsdesc->td_tlsindex */
 	cmp	x2, x3
-	b.lt	1f			/* Slow path */
+	b.gt	1f			/* Slow path when idx > MAX */
 
 	ldr     x3, [x0, x2, lsl #3]	/* dtv[tlsdesc->td_tlsindex] */
 	cbz	x3, 1f			/* Slow path when dtv[idx] == NULL */
